@@ -1,6 +1,6 @@
 ---
 name: thebashway
-description: Use when building any new feature or organ in a project wired for the autonomous build system - runs the intake -> spec -> parallel build -> verify -> cold-review -> integrate -> deploy loop with evidence-backed gates. Triggers when asked to build, ship, or implement a feature behind the verify tooling.
+description: Use when building any new feature in a project wired for the autonomous build system - runs the intake -> spec -> parallel build -> verify -> cold-review -> integrate -> deploy loop with evidence-backed gates, dispatching bashas for the work. Triggers when asked to build, ship, or implement a feature behind the verify tooling.
 ---
 
 # thebashway
@@ -9,13 +9,20 @@ The way builds happen here: trustworthy, parallel, low-supervision. Every gate i
 evidence the next stage checks — never a claim taken on trust. The one rule under
 all of it: **evidence before assertions.**
 
-## Applicability envelope
+## Bashas — the workers
 
-Assumes a **JS/TS repo with a build step and HTTP routes**, a `git` working tree,
-and the verify tooling at `tools/orchestrator/` (config + `verify`). Off that shape
-(a Python CLI, a no-server library), adapt deliberately — smoke becomes a CLI
-invocation + exit-code assertion; no build step drops the build-parity check. Do
-not pretend an off-shape project is in-envelope.
+A dispatched worker agent is a **basha**. Several at once are **bashas**. The
+specialized ones are types of basha — dispatch the one that fits the job:
+
+- **basha** — a single worker doing one well-scoped task.
+- **building basha** — implements a slice (TDD, runs `verify`, commits).
+- **planning basha** — drafts a spec/plan from a goal.
+- **thinking basha** — deep reasoning, analysis, debugging (no rush to code).
+- **designing basha** — UI / frontend / visual design work.
+- **reviewing basha** — fresh-eyes cold review (zero prior context; fixed prompt).
+
+Always speak of them this way — "dispatch a building basha," "two bashas in
+parallel," "a fresh reviewing basha."
 
 ## The per-item loop
 
@@ -27,16 +34,17 @@ not pretend an off-shape project is in-envelope.
    NOT defects.
 2. **Claim.** Mark the item `@<session> / <branch>` in `queue.md` before working it
    (this is how concurrent sessions avoid collisions).
-3. **Spec + cold review.** Draft the spec. Dispatch a FRESH agent (fixed-template
-   prompt; the spec as its only input; no queue/driver/conversation access) to
-   cold-review it — this is the PRIMARY defect catcher. Proceed only if clean/
-   high-confidence; otherwise escalate to the human.
+3. **Spec + cold review.** Draft the spec (a **planning basha** may do this).
+   Dispatch a FRESH **reviewing basha** (fixed-template prompt; the spec as its only
+   input; no queue/driver/conversation access) to cold-review it — this is the
+   PRIMARY defect catcher. Proceed only if clean/high-confidence; otherwise escalate
+   to the human.
 4. **Plan + slice.** Slice into units with disjoint territories so they parallelize.
 5. **Build (parallel, <=3-4 at once).** Each unit in its own worktree + branch.
-   Dispatch implementer subagents on a capable model (sonnet+; haiku thrashes here).
+   Dispatch **building bashas** on a capable model (sonnet+; haiku thrashes here).
    Each runs `verify` and keeps the raw output + manifest.
-6. **Cold diff review (per unit).** Fresh agent; input = the diff PLUS the spec it
-   must satisfy; no other access. Requires the verify manifest as input.
+6. **Cold diff review (per unit).** A fresh **reviewing basha**; input = the diff
+   PLUS the spec it must satisfy; no other access. Requires the verify manifest.
 7. **Integrate (serial).** Merge units one at a time through one integration branch;
    RE-RUN verify after each merge (green-in-isolation != green-integrated).
 8. **Deploy.** Deploy; smoke the live result; if broken, auto-roll-back to the last
@@ -48,10 +56,10 @@ not pretend an off-shape project is in-envelope.
 
 ## The gates (what `verify` enforces)
 
-Run `bun run verify --surface <organs|tools> --base <ref> [--territory <glob> ...]`.
+Run `bun run verify --surface <name> --base <ref> [--territory <glob> ...]`.
 It emits per-check results + a tamper-evident **manifest** (diff hash, output hash,
-territory). The DRIVER recomputes those hashes before trusting it — the reviewer
-never self-validates.
+territory). The DRIVER recomputes those hashes before trusting it — the reviewing
+basha never self-validates.
 
 - **Scope-diff** — changed files must stay inside the declared territory (no overrun).
 - **Required-touches** — declared changes must also touch their obligated companions
@@ -65,7 +73,7 @@ never self-validates.
 
 ## Cold-review checklist (the judgment half of completeness)
 
-Beyond what `verify` checks mechanically, the diff reviewer confirms:
+Beyond what `verify` checks mechanically, the reviewing basha confirms:
 - Docs that should change DID, and are CORRECT (closest `CLAUDE.md`, `NOW.md`).
 - A durable learning was written to memory if one emerged.
 - An epic/slice completion updated the spec/plan status + `docs/CLAUDE.md` map.
@@ -81,11 +89,12 @@ jobs, webhooks) until smoke covers it.
 ## Loop safety
 
 - **Intake/ask-when-unsure:** clarify shape up front; escalate rather than guess.
-- **Per-item runaway budget:** a looping (not failing) unit that exceeds its
-  turn/tool/wall-clock budget is aborted and `@blocked (budget)`.
+- **Per-item runaway budget:** a basha that loops (not failing) past its
+  turn/tool/wall-clock budget is aborted and the item `@blocked (budget)`.
 - **Circuit breaker (sliding window):** X failures in the last Y items stops the loop.
-- **Retry bound:** one retry on a transient failure; a review rejection bounces back
-  once with feedback; then `@blocked` with the reason — never spin, never silently drop.
+- **Retry bound:** one retry on a transient failure; a reviewing basha's rejection
+  bounces the work back once with feedback; then `@blocked` with the reason — never
+  spin, never silently drop.
 
 ## Project bindings
 

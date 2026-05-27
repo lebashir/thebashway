@@ -27,15 +27,17 @@ emits a tamper-evident manifest (diff hash + output hash + territory).
 
 ## The loop, run by a session
 
-A session invokes the `thebashway` skill and works one queue item at a time:
+A session invokes the `thebashway` skill and works one queue item at a time.
+(The dispatched workers are **bashas**: a single *basha*; specialized ones are
+*building / planning / thinking / designing / reviewing* bashas.)
 
 1. **Intake** — clarify the item's *shape* with the human at add-time; write a
    self-contained entry to `queue.md`.
 2. **Claim** — `claimNext(session, branch, queuePath)` (lock-guarded).
-3. **Spec + cold review** — fresh agent, spec as its only input.
-4. **Slice + build** — disjoint territories, isolated worktrees, ≤3–4 parallel.
+3. **Spec + cold review** — a reviewing basha, spec as its only input.
+4. **Slice + build** — building bashas; disjoint territories, isolated worktrees, ≤3–4 parallel.
 5. **`verify`** each chunk; keep the manifest.
-6. **Diff review** — fresh agent, diff + spec as input; requires the manifest.
+6. **Diff review** — a reviewing basha, diff + spec as input; requires the manifest.
 7. **Integrate** — serial merges, re-verify after each.
 8. **Deploy + smoke** — auto-roll-back on failure; `markBlocked` with the reason.
 9. **Cleanup** — `assertClean(branchPattern)` after worktree teardown.

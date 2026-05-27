@@ -19,14 +19,17 @@ downstream runs.
 
 ## The loop (per piece of work)
 
-intake (clarify shape, write a queue entry) → claim → draft spec → **fresh-agent
-cold review** of the spec → slice into disjoint-territory chunks → build them in
-parallel in isolated worktrees → **`verify`** each → **fresh-agent diff review**
-→ integrate serially, re-verifying after each merge → deploy + smoke (auto-roll-
-back if broken) → **leave-no-trace** (asserted) → digest (log + a NOW-style line).
+intake (clarify shape, write a queue entry) → claim → draft spec (a **planning
+basha**) → **reviewing basha** cold-reviews the spec → slice into disjoint-territory
+chunks → **building bashas** build them in parallel in isolated worktrees →
+**`verify`** each → a **reviewing basha** does the diff review → integrate serially,
+re-verifying after each merge → deploy + smoke (auto-roll-back if broken) →
+**leave-no-trace** (asserted) → digest (log + a NOW-style line).
 
-The "driver" is **a Claude Code session running the `thebashway` skill** plus the
-helpers below — not a standalone program calling an LLM API.
+The dispatched workers are **bashas** (a single one is a *basha*; specialized ones
+are *building / planning / thinking / designing / reviewing* bashas). The "driver"
+is **a Claude Code session running the `thebashway` skill** plus the helpers below —
+not a standalone program calling an LLM API.
 
 ## The gates (`verify`)
 
