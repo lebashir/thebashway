@@ -35,7 +35,7 @@ A session invokes the `thebashway` skill and works one queue item at a time.
    self-contained entry to `queue.md`.
 2. **Claim** — `claimNext(session, branch, queuePath)` (lock-guarded).
 3. **Spec + cold review** — a reviewing basha, spec as its only input.
-4. **Slice + build** — building bashas; disjoint territories, isolated worktrees, ≤3–4 parallel.
+4. **Slice + build** — building bashas; disjoint territories, isolated worktrees, ≤3–4 parallel. Prime each basha with `formatForPrompt(relevantLessons(await readLessons(lessonsPath), [surface]))`.
 5. **`verify`** each chunk; keep the manifest.
 6. **Diff review** — a reviewing basha, diff + spec as input; requires the manifest.
 7. **Integrate** — serial merges, re-verify after each.
@@ -56,6 +56,7 @@ import {
   shouldTrip, overBudget,       // circuit breaker + runaway budget
   formatRecord, summaryLine, appendDigest,        // run digest
   classifyChanges, checkRequiredTouches, checkFreshness, freePort, // gate pieces
+  readLessons, relevantLessons, formatForPrompt, appendLesson,     // learn from past mistakes
 } from "thebashway";
 ```
 
@@ -64,6 +65,10 @@ import {
 - `shouldTrip(recentOutcomes, maxFailures, window)` — sliding-window circuit
   breaker (not "N consecutive").
 - `overBudget(used, limit)` — per-item runaway guard.
+- **Lessons (learn from mistakes):** `readLessons(path)` → `relevantLessons(ls, [area])`
+  → `formatForPrompt(...)` injects "Known pitfalls — do not repeat" into a basha's
+  prompt. On any gate/review catch, `appendLesson(path, { tag, rule })` records it
+  (dedup automatic). General lessons graduate into the skill.
 
 ## Safety rails (never autonomous)
 

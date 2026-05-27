@@ -41,8 +41,9 @@ parallel," "a fresh reviewing basha."
    to the human.
 4. **Plan + slice.** Slice into units with disjoint territories so they parallelize.
 5. **Build (parallel, <=3-4 at once).** Each unit in its own worktree + branch.
-   Dispatch **building bashas** on a capable model (sonnet+; haiku thrashes here).
-   Each runs `verify` and keeps the raw output + manifest.
+   Dispatch **building bashas** on a capable model (sonnet+; haiku thrashes here),
+   injecting the relevant lessons into each one's prompt (see Lessons). Each runs
+   `verify` and keeps the raw output + manifest.
 6. **Cold diff review (per unit).** A fresh **reviewing basha**; input = the diff
    PLUS the spec it must satisfy; no other access. Requires the verify manifest.
 7. **Integrate (serial).** Merge units one at a time through one integration branch;
@@ -96,10 +97,26 @@ jobs, webhooks) until smoke covers it.
   bounces the work back once with feedback; then `@blocked` with the reason — never
   spin, never silently drop.
 
+## Lessons — learn from mistakes (feed forward)
+
+A running `tools/orchestrator/lessons.md` holds distilled pitfalls, each a
+`- [tag] rule` line (tag = an area, or `general`). It's the curated layer above the
+per-run digest.
+
+- **Before dispatching any basha**, read `lessons.md`, take the ones tagged
+  `general` or the basha's surface/area (`relevantLessons`), and paste them into its
+  prompt as **"Known pitfalls — do not repeat"** (`formatForPrompt`). Every basha
+  starts knowing what bit the last ones.
+- **When a gate fails or a reviewing basha catches a real mistake**, append a
+  one-line lesson (`appendLesson`) — distilled to a rule, tagged. Dedup is automatic
+  ("caught twice" logs once).
+- General, cross-project lessons graduate into this skill over time.
+
 ## Project bindings
 
 Project-specific knowledge lives in `tools/orchestrator/`, not in this skill:
 `config.ts` (surfaces + verify commands + env quirks), `required-touches.ts` (the
-matrix), `queue.md` (the live queue). A new project swaps those and keeps this skill.
+matrix), `queue.md` (the live queue), `lessons.md` (the learning log). A new
+project swaps those and keeps this skill.
 
 See the full rationale in the project's build-system spec.

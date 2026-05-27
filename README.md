@@ -31,6 +31,10 @@ are *building / planning / thinking / designing / reviewing* bashas). The "drive
 is **a Claude Code session running the `thebashway` skill** plus the helpers below —
 not a standalone program calling an LLM API.
 
+Bashas **learn from mistakes**: each one is primed with the project's **lessons**
+(`lessons.md` — past pitfalls, by area), and a new lesson is appended whenever a gate
+or a reviewing basha catches a real mistake — so future bashas don't repeat it.
+
 ## The gates (`verify`)
 
 For each surface, `verify` runs and emits a manifest:
@@ -48,7 +52,7 @@ For each surface, `verify` runs and emits a manifest:
 |---|---|
 | `skill/SKILL.md` — the method | `config.ts` — your surfaces + commands |
 | `src/verify/*` — the gate engine | `required-touches.ts` — your rules |
-| `src/{lock,queue,queue-ops,manifest-check,cleanup,breaker,digest}.ts` — helpers | `queue.md` — your live queue |
+| `src/{lock,queue,queue-ops,manifest-check,cleanup,breaker,digest,lessons}.ts` — helpers | `queue.md` — your live queue; `lessons.md` — your learning log |
 | `runVerify()` — the config-driven entry | `verify.ts` — thin entry calling `runVerify` |
 
 ## Quickstart
@@ -72,7 +76,7 @@ bun run tools/orchestrator/verify.ts --surface app --base <ref>
 skill/SKILL.md     the portable method (install.sh symlinks it into ~/.claude/skills)
 src/               the engine: verify/ (gates) + helpers + runVerify
 src/verify/__tests__/   the generic test suite (bun test)
-template/          copy-into-a-project starter (config, rules, queue, verify entry)
+template/          copy-into-a-project starter (config, rules, queue, lessons, verify entry)
 USAGE.md           day-to-day: running verify, the helper API, the rails
 ```
 
