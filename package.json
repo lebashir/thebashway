@@ -1,0 +1,13 @@
+{
+  "name": "thebashway",
+  "version": "0.1.0",
+  "description": "Portable autonomous build-system method + engine: evidence-backed gates, parallel worktrees, fresh-agent review, leave-no-trace.",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}
