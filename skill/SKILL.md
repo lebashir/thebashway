@@ -66,23 +66,28 @@ proceed.
 
 ## Run mode — autonomous queue consumption
 
-When invoked to build (with an explicit "run the queue" or just "ship the
-queue items"), the loop is:
+**Who runs what.** The USER never types orchestration commands. The DRIVER
+(this CC session running the skill) calls the `bun run thebashway <cmd>`
+primitives via its Bash tool — they are implementation detail of the
+autonomous flow, not a user-facing CLI. When the user says "go," "ship the
+queue," "do the next batch," or just drops items in queue.md and invokes the
+skill, the driver runs all of the following without asking:
 
-1. **Preflight ONCE per session:** `bun run thebashway preflight <surface>`
-   pushes any local commits, regenerates derived artifacts (commits + pushes if
-   the snapshot was stale), asserts no stray worktrees / orphan branches, and
-   verifies the gitignored seed files exist (worktree spawner will copy them).
-2. **Claim a batch:** `bun run thebashway claim <n>` claims up to `n`
-   claim-able items (status `@unclaimed` AND every `DependsOn` resolved). The
-   budget `n` is `MAX_CONCURRENT_BASHAS` (see project `config.ts`). Each gets
-   `@<session> / <branch>` so concurrent sessions don't collide.
+1. **Auto-preflight (once per session):** the driver Bash-runs
+   `bun run thebashway preflight <surface>` — pushes any local commits,
+   regenerates derived artifacts (commits + pushes if the snapshot was stale),
+   asserts no stray worktrees / orphan branches, verifies gitignored seed
+   files exist.
+2. **Auto-claim a batch:** the driver Bash-runs `bun run thebashway claim
+   <n>` to claim up to `n` claim-able items (`@unclaimed` AND every
+   `DependsOn` resolved). `n = MAX_CONCURRENT_BASHAS`. Each gets `@<session>
+   / <branch>` so concurrent sessions don't collide.
 3. **For each claimed item, run the per-item loop** (next section). Slices
    inside an item can run in parallel worktrees; the budget covers BOTH levels.
-4. **On per-item completion**, scan the queue for the next claim-able item
-   and pick it up. Do not ask. Do not stop.
-5. **Exit** when no claim-able items remain (queue empty OR everything left is
-   parked OR claimed by another session). Write the session digest. Stop.
+4. **On per-item completion**, the driver re-scans queue.md, claims the next
+   claim-able item, and continues. **Does not ask. Does not stop.**
+5. **Exit** when no claim-able items remain (queue empty OR everything left
+   is parked OR claimed by another session). Write the session digest.
 
 **Multi-session safety:** session id = `process.env.CLAUDE_SESSION_ID` if set,
 else `$USER`. A second session started in parallel sees items claimed by the
@@ -90,8 +95,9 @@ first as `@other-session/...` and skips them, claiming the next batch instead.
 Queue ops are flock'd; races can't double-claim. A claim that hasn't seen
 branch commits in >6h is treated as abandoned and re-claimable.
 
-**Auto-pickup is the default**, not a mode you toggle. Stops only on the three
-rails (see Rails) or the circuit breaker.
+**Auto-pickup is the default**, not a mode you toggle. The user never has to
+say "next" — only "go" once (or just invoke the skill). Stops only on the
+three rails (see Rails) or the circuit breaker.
 
 ## The per-item loop
 
@@ -225,6 +231,36 @@ item (e.g. "OK, proceed with delete: yes — confirmed").
 - **Retry bound:** one retry on a transient failure; reviewing-basha's
   rejection bounces work back once with feedback; then `@parked` with the
   reason — never spin, never silently drop.
+
+## Decision-style learning — ask less over time
+
+The driver should ask the user FEWER questions each session, not the same
+number. Two mechanisms make this real:
+
+1. **Read the user's decision-style memory at intake.** The project's
+   memory dir has a `<user>-decision-style.md` file (e.g.
+   `bashir-decision-style.md`) holding observed patterns — preferred
+   defaults for naming, scope, autonomy, commit cadence, design choices,
+   what they always-confirm vs. always-let-the-AI-decide. The intake
+   planning basha reads this BEFORE drafting clarifications and pre-fills
+   defaults from it. Questions whose answers are already in style memory
+   do NOT get asked.
+2. **Append after each session.** When the user answers a clarification,
+   corrects an assumption, or just lets a default ride uncorrected, the
+   driver appends a one-line observation to the style memory:
+   - "Asked X → answered Y" (a stated preference)
+   - "Assumed Z → not corrected over <N> items" (an inferred preference)
+   - "Corrected my W to V" (a explicit redirection)
+
+   Dedup is automatic (identical lines collapse). Confidence builds with
+   repetition — an observation seen twice graduates from "noticed" to
+   "default." After enough sessions, what once needed asking becomes
+   inferable.
+
+The bar for keeping a clarification in the intake preview at all is: the
+style memory has NO entry that resolves this question. If it does, the
+basha picks the inferred default and notes it in `Clarifications:` for
+the user to overrule if they want — no preview question.
 
 ## Lessons — feed forward, kept tight
 
