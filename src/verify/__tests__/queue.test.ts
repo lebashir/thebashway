@@ -53,6 +53,47 @@ test("ignores items inside HTML comments (commented examples are not live)", () 
   expect(parseQueue(md)).toHaveLength(0);
 });
 
+test("parses @parked (reason) and @parked-on:<title>", () => {
+  const md = `# queue\n\n- [ ] X        @parked (needs schema call)\n  Goal: a\n  Territory: t/**\n  Done-when: v\n\n- [ ] Y        @parked-on:X\n  Goal: a\n  Territory: t/**\n  Done-when: v\n  DependsOn: X\n`;
+  const items = parseQueue(md);
+  expect(items[0].status).toBe("parked");
+  expect(items[0].parkReason).toBe("needs schema call");
+  expect(items[1].status).toBe("parked-on");
+  expect(items[1].parkedOn).toBe("X");
+  expect(items[1].dependsOn).toEqual(["X"]);
+});
+
+test("serializeItem renders @parked + Park-reason line, and round-trips", () => {
+  const item: QueueItem = {
+    title: "Z",
+    status: "parked",
+    parkReason: "ask Bashir",
+    goal: "g",
+    territory: ["t/**"],
+    doneWhen: "v",
+    clarifications: [],
+  };
+  const re = parseQueue(serializeItem(item))[0];
+  expect(re.status).toBe("parked");
+  expect(re.parkReason).toBe("ask Bashir");
+});
+
+test("serializeItem renders DependsOn and round-trips", () => {
+  const item: QueueItem = {
+    title: "W",
+    status: "unclaimed",
+    goal: "g",
+    territory: ["t/**"],
+    doneWhen: "v",
+    dependsOn: ["X", "Y"],
+    clarifications: [],
+  };
+  const text = serializeItem(item);
+  expect(text).toContain("DependsOn: X, Y");
+  const re = parseQueue(text)[0];
+  expect(re.dependsOn).toEqual(["X", "Y"]);
+});
+
 test("serializeItem round-trips through parseQueue", () => {
   const item: QueueItem = {
     title: "Do a thing",
