@@ -3,6 +3,16 @@
 // commands. A "surface" is a buildable/testable area (an app, a package, a CLI).
 import type { SurfaceConfig } from "thebashway";
 
+/**
+ * Run-mode budget: the maximum number of in-flight bashas across ALL queue
+ * items + within-item slices. The autonomous run loop allocates this budget
+ * FIFO. Tune per machine + per LLM-rate-limit; 4 is a sane default.
+ */
+export const MAX_CONCURRENT_BASHAS = 4;
+
+/** Glob for orphan-branch cleanup. Bashas branch under this prefix. */
+export const DEFAULT_BRANCH_PATTERN = "tbw/*";
+
 export const SURFACES: Record<string, SurfaceConfig> = {
   // Example: a Next.js-style app surface.
   app: {
