@@ -42,6 +42,18 @@ test("formatForPrompt produces a Known-pitfalls block; empty for none", () => {
   expect(s).toContain("(organs)");
 });
 
+test("with `## Active` header, only Active-section lessons are parsed; Graduated ignored", () => {
+  const md = `# lessons\n\nIntro prose.\n\n## Active\n\n- [organs] active one\n- [general] another active\n\n## Graduated\n\n- [general] this was retired\n- [organs] also retired\n`;
+  const ls = parseLessons(md);
+  expect(ls).toHaveLength(2);
+  expect(ls.map((l) => l.rule)).toEqual(["active one", "another active"]);
+});
+
+test("without `## Active` header, whole doc is parsed (backward compatible)", () => {
+  const ls = parseLessons(SAMPLE);
+  expect(ls).toHaveLength(3);
+});
+
 test("appendLesson appends, and dedups identical rules", async () => {
   const p = join(tmpdir(), `lessons-${Math.random().toString(36).slice(2)}.md`);
   expect(await appendLesson(p, { tag: "general", rule: "always commit per task" })).toBe(true);
@@ -50,5 +62,22 @@ test("appendLesson appends, and dedups identical rules", async () => {
   const ls = await readLessons(p);
   expect(ls).toHaveLength(2);
   expect(existsSync(p)).toBe(true);
+  unlinkSync(p);
+});
+
+test("appendLesson inserts into `## Active` section (not after `## Graduated`)", async () => {
+  const p = join(tmpdir(), `lessons-${Math.random().toString(36).slice(2)}.md`);
+  await Bun.write(p, `# lessons\n\n## Active\n\n- [organs] first\n\n## Graduated\n\n- [general] old retired one\n`);
+  expect(await appendLesson(p, { tag: "general", rule: "new active rule" })).toBe(true);
+  const text = await Bun.file(p).text();
+  const activeIdx = text.indexOf("## Active");
+  const newIdx = text.indexOf("new active rule");
+  const gradIdx = text.indexOf("## Graduated");
+  expect(activeIdx).toBeGreaterThan(-1);
+  expect(newIdx).toBeGreaterThan(activeIdx);
+  expect(newIdx).toBeLessThan(gradIdx);
+  // Still excludes the Graduated rule on read.
+  const ls = await readLessons(p);
+  expect(ls.map((l) => l.rule)).toEqual(["first", "new active rule"]);
   unlinkSync(p);
 });
