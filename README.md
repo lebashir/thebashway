@@ -1,71 +1,83 @@
 # thebashway
 
-A portable, autonomous **build system** for AI-driven software work: a *method*
-(a Claude Code skill) plus an *engine* (executable gates + driver helpers) that
-make building trustworthy and low-supervision — parallel where possible, with
-evidence-backed gates so you stop getting surprised.
+> **STALE — reference only (as of 2026-06-04).** The live, canonical thebashway lives in
+> `lifeofbash/tools/orchestrator/`. It has moved well past this extract — the staged
+> self-building loop (the `@needs-intake` build-ready gate, `add`/`mark-ready` capture +
+> intake, the Loop A decision store, the question-ledger, the codified drain protocol) is
+> NOT here. This standalone copy froze on 2026-05-28 and has drifted on the skill and
+> several files. Do not bootstrap a new project from it without reconciling against the
+> in-repo source first. Kept as a historical record of the extraction.
 
-It was extracted from the `lifeofbash` project (where it was designed and
-hardened against four real mid-course failures), and made reusable across any
-project.
+A build system for AI-driven software work. When you let AI agents write code, they
+tell you they're "done" and you get surprised later. thebashway is the discipline that
+stops the surprises: a *method* (a Claude Code skill) plus an *engine* (executable gates
+and driver helpers) that let agents build in parallel, with each step forced to prove its
+work to the next one.
+
+It was extracted from the `lifeofbash` project, where it was designed and hardened against
+four real mid-course failures, and made reusable across any project.
 
 ## The one idea
 
-**Evidence before assertions.** Nothing trusts a claim — not an agent's "done,"
-not a gate's "looks fine." Every stage hands the next stage **proof it re-checks**:
-the changed-file set is diffed, gates emit raw output, and a tamper-evident
-**manifest** (content hashes) is recomputed by the driver before anything
-downstream runs.
+Evidence before assertions. Nothing trusts a claim, not an agent's "done" and not a gate's
+"looks fine." Every stage hands the next stage proof that the next stage re-checks: the
+changed-file set is diffed, gates emit their raw output, and a tamper-evident manifest of
+content hashes is recomputed by the driver before anything downstream runs.
 
-## The loop (per piece of work)
+## The loop
 
-intake (clarify shape, write a queue entry) → claim → draft spec (a **planning
-basha**) → **reviewing basha** cold-reviews the spec → slice into disjoint-territory
-chunks → **building bashas** build them in parallel in isolated worktrees →
-**`verify`** each → a **reviewing basha** does the diff review → integrate serially,
-re-verifying after each merge → deploy + smoke (auto-roll-back if broken) →
-**leave-no-trace** (asserted) → digest (log + a NOW-style line).
+Each piece of work moves through one path: intake (clarify the shape, write a queue entry),
+claim it, draft a spec, cold-review that spec, slice it into chunks that touch separate
+territory, build those chunks in parallel in isolated git worktrees, run `verify` on each,
+review the diffs, integrate serially while re-verifying after every merge, deploy and smoke
+test with automatic rollback if anything breaks, assert that no mess was left behind, then
+log a digest line.
 
-The dispatched workers are **bashas** (a single one is a *basha*; specialized ones
-are *building / planning / thinking / designing / reviewing* bashas). The "driver"
-is **a Claude Code session running the `thebashway` skill** plus the helpers below —
-not a standalone program calling an LLM API.
+The workers that do the building are called *bashas* (one is a basha; specialized kinds are
+planning, building, thinking, designing, and reviewing bashas). The "driver" is a Claude Code
+session running the thebashway skill plus the helpers below, not a standalone program calling
+an LLM API.
 
-Bashas **learn from mistakes**: each one is primed with the project's **lessons**
-(`lessons.md` — past pitfalls, by area), and a new lesson is appended whenever a gate
-or a reviewing basha catches a real mistake — so future bashas don't repeat it.
+Bashas learn from mistakes. Each one is primed with the project's accumulated lessons
+(`lessons.md`, past pitfalls grouped by area), and a new lesson is appended whenever a gate or
+a reviewing basha catches a real mistake, so later bashas don't repeat it.
 
 ## The gates (`verify`)
 
-For each surface, `verify` runs and emits a manifest:
+For each surface, `verify` runs these checks and emits a manifest:
 
-- **scope-diff** — changed files stay inside the unit's declared territory.
-- **required-touches** — declared changes also touch their obligated companions
-  (the inverse guard; your rules).
-- **freshness** — generated artifacts aren't stale; the *real* build runs.
-- **gate chain** — tsc / lint / tests / build.
-- **smoke** — each route returns 200 + a positive marker, on an ephemeral port.
+- **scope-diff:** changed files stay inside the unit's declared territory.
+- **required-touches:** declared changes also touch the companion files they oblige (the
+  inverse guard, defined by your own rules).
+- **freshness:** generated artifacts aren't stale; the real build actually runs.
+- **gate chain:** tsc, lint, tests, build.
+- **smoke:** each route returns 200 with a positive marker, on an ephemeral port.
 
-## What's portable vs yours
+## What's portable vs. what's yours
+
+The left column ships with the package. The right column is the thin wiring each project adds.
 
 | The package (portable) | Your project (wiring) |
 |---|---|
-| `skill/SKILL.md` — the method | `config.ts` — your surfaces + commands |
-| `src/verify/*` — the gate engine | `required-touches.ts` — your rules |
-| `src/{lock,queue,queue-ops,manifest-check,cleanup,breaker,digest,lessons}.ts` — helpers | `queue.md` — your live queue; `lessons.md` — your learning log |
-| `runVerify()` — the config-driven entry | `verify.ts` — thin entry calling `runVerify` |
+| `skill/SKILL.md`, the method | `config.ts`, your surfaces and commands |
+| `src/verify/*`, the gate engine | `required-touches.ts`, your rules |
+| `src/*.ts` helpers (lock, queue, manifest-check, cleanup, breaker, digest, lessons) | `queue.md` (live queue) and `lessons.md` (learning log) |
+| `runVerify()`, the config-driven entry point | `verify.ts`, a thin entry that calls `runVerify` |
 
 ## Quickstart
 
-**Install the method (once, global):**
-```bash
-./install.sh        # symlinks skill/ -> ~/.claude/skills/thebashway
-```
-Now any Claude Code session can invoke the `thebashway` skill.
+Install the method once, globally:
 
-**Wire a project (for the executable gates):** see `template/README.md` — copy
-the four template files into `tools/orchestrator/`, add `thebashway` as a `file:`
-dependency, edit `config.ts`, and run:
+```bash
+./install.sh        # symlinks skill/ into ~/.claude/skills/thebashway
+```
+
+Any Claude Code session can now invoke the thebashway skill.
+
+To wire a project for the executable gates, see `template/README.md`: copy the four template
+files into `tools/orchestrator/`, add thebashway as a `file:` dependency, edit `config.ts`,
+then run:
+
 ```bash
 bun run tools/orchestrator/verify.ts --surface app --base <ref>
 ```
@@ -73,26 +85,26 @@ bun run tools/orchestrator/verify.ts --surface app --base <ref>
 ## Layout
 
 ```
-skill/SKILL.md     the portable method (install.sh symlinks it into ~/.claude/skills)
-src/               the engine: verify/ (gates) + helpers + runVerify
+skill/SKILL.md          the portable method (install.sh symlinks it into ~/.claude/skills)
+src/                    the engine: verify/ (gates) plus helpers plus runVerify
 src/verify/__tests__/   the generic test suite (bun test)
-template/          copy-into-a-project starter (config, rules, queue, lessons, verify entry)
-USAGE.md           day-to-day: running verify, the helper API, the rails
+template/               copy-into-a-project starter (config, rules, queue, lessons, verify entry)
+USAGE.md                day-to-day: running verify, the helper API, the rails
 ```
 
 ## Applicability envelope
 
-Assumes a **JS/TS repo with a build step and HTTP routes**, a git working tree,
-and Bun. Off that shape (a Python CLI, a server-less library), adapt `config.ts`
-deliberately — smoke becomes a CLI exit-code check; drop the build/freshness
-checks if there is no build step. The skill names these adaptations.
+This assumes a JS/TS repo with a build step and HTTP routes, a git working tree, and Bun. Off
+that shape (a Python CLI, a serverless library), adapt `config.ts` deliberately: smoke becomes
+a CLI exit-code check, and you drop the build and freshness checks if there is no build step.
+The skill spells out these adaptations.
 
 ## Status
 
-Extracted 2026-05-27 from lifeofbash. Engine + helpers + skill are complete and
-tested (`bun test`). The autonomous *loop* is run by a session following the
-skill; an unattended daemon is future work.
+Extracted 2026-05-27 from lifeofbash. The engine, helpers, and skill are complete and tested
+(`bun test`). The autonomous loop is run by a session following the skill; an unattended daemon
+is future work.
 
-## License / ownership
+## License and ownership
 
-Personal tooling. Mine-and-portable by design.
+Personal tooling. Mine and portable by design.
