@@ -284,8 +284,8 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
   //    organs (a new organs route smoke can't exercise → stage for your review). Else stage.
   const built = new Set(drain.succeeded);
   const notBuilt = buildReadyTitles.filter((t) => !built.has(t));
-  const stageOnlyOrgans = surface === "organs";
-  const canLand = notBuilt.length === 0 && !drain.breakerTripped && !stageOnlyOrgans;
+  const stageOnly = !!SURFACES[surface]?.stageNotDeploy;
+  const canLand = notBuilt.length === 0 && !drain.breakerTripped && !stageOnly;
 
   let landed = false;
   let landResult: string;
@@ -296,8 +296,8 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
       ? `landed ${drain.integrationBranch} → main + pushed (deployed)`
       : `LAND FAILED (safe at ${drain.integrationBranch}): ${res.reason ?? "unknown"}`;
   } else {
-    const reason = stageOnlyOrgans
-      ? "organs is a secondary view — staged for your review (smoke cannot exercise a new route)"
+    const reason = stageOnly
+      ? "this surface stages for review (a smoke test cannot exercise a new route)"
       : notBuilt.length > 0
         ? `${notBuilt.length} of ${buildReadyTitles.length} member(s) not built (${drain.blocked.length} blocked) — staged, not deployed (no half-built feature)`
         : drain.breakerTripped

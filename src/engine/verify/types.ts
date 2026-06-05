@@ -36,6 +36,10 @@ export interface SurfaceConfig {
   smoke: { cmd: string[]; portEnv: string; needsBuild: boolean } | null;
   /** Extra env merged into every command for this surface. */
   env?: Record<string, string>;
+  /** Needs a real (non-symlinked) install in a worktree before its gate (e.g. Turbopack). */
+  needsRealInstall?: boolean;
+  /** Build but do NOT auto-deploy on land — stage for human review (e.g. a view a smoke can't exercise). */
+  stageNotDeploy?: boolean;
 }
 
 export interface CheckResult {

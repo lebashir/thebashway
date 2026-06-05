@@ -2,6 +2,7 @@
 // The ONLY project-specific file in the orchestrator. A new project swaps this
 // out and keeps everything else. See the spec's "Portability" section.
 import type { SurfaceConfig } from "./verify/types";
+import type { ResolvedBinding } from "./binding";
 
 /**
  * Run-mode budget: the maximum number of in-flight *build* bashas (heavy — each
@@ -56,7 +57,7 @@ export const SWEEP = {
   // Soft warning threshold: when the un-triaged @needs-intake backlog exceeds this,
   // the sweep prints a heads-up so the queue can't silently grow unbounded.
   backlogWarnAt: 25,
-} as const;
+};
 
 /**
  * Directed-audit fan-out ceiling: the maximum number of sub-areas (finder bashas)
@@ -131,7 +132,7 @@ export const DESIGN_IRREVERSIBLE = {
   // @needs-intake costs one glance; a false build-ready could reach people or destroy data).
   keywords:
     /\b(?:send|sends|sending|sent|email|e-mail|emails|emailed|mail|message|messages|messaged|messaging|dm|dms|ping|pings|text|texts|texting|notify|notifies|notified|notifying|notification|nudge|nudges|nudging|remind|reminds|reminder|reminders|reach out|reaches out|sms|whatsapp|telegram|slack|broadcast|broadcasts|blast|blasts|alert|alerts|publish|published|tweet|tweets|post to|posts to|delete|deletes|deleting|deleted|drop|drops|dropping|dropped|truncate|truncates|truncated|destroy|destroys|destroying|destroyed|cancel|cancels|cancelling|canceling|cancelled|purge|purges|purged|wipe|wipes|wiped|erase|erases|erased|flush|flushes|remove all|removes all|removed all|clear all|reset the (?:db|database|table)|rm -rf)\b/i,
-} as const;
+};
 
 /**
  * OUT-door drain circuit breaker (sliding window). The loop appends exactly ONE
@@ -198,6 +199,8 @@ export const SURFACES: Record<string, SurfaceConfig> = {
       portEnv: "SMOKE_PORT",
       needsBuild: true,
     },
+    needsRealInstall: true,
+    stageNotDeploy: true,
   },
   tools: {
     dir: "tools",
@@ -217,3 +220,54 @@ export const SURFACES: Record<string, SurfaceConfig> = {
     env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" },
   },
 };
+
+// ---------------------------------------------------------------------------
+// Binding injection (portable engine)
+//
+// SURFACES, AUDIT_TARGETS, SWEEP, and DESIGN_IRREVERSIBLE above are the
+// project-specific binding. They default to lifeofbash's values (kept here so the
+// engine's own tests + a lifeofbash run behave identically). A DIFFERENT project's
+// CLI calls setBinding(loadedBinding) once at startup to override them IN PLACE.
+// Consumers `import { SURFACES } from "./config"` and read these objects at
+// call-time, so an in-place swap reaches every reader without threading a binding
+// parameter through the whole engine. resetBinding() restores the defaults (tests).
+// ---------------------------------------------------------------------------
+
+const _DEFAULTS = {
+  surfaces: { ...SURFACES },
+  auditTargets: { ...AUDIT_TARGETS },
+  sweep: { ...SWEEP },
+  rails: { territoryGlobs: DESIGN_IRREVERSIBLE.territoryGlobs, keywords: DESIGN_IRREVERSIBLE.keywords },
+};
+
+function _replaceRecord<T>(target: Record<string, T>, src: Record<string, T>): void {
+  for (const k of Object.keys(target)) delete target[k];
+  Object.assign(target, src);
+}
+
+let _defaultSurface = "tools";
+
+/** The binding's defaultSurface — where ambiguous work and unknown paths land. */
+export function getDefaultSurface(): string {
+  return _defaultSurface;
+}
+
+/** Override the project-specific binding values in place. Called once by the CLI at startup. */
+export function setBinding(b: ResolvedBinding): void {
+  _defaultSurface = b.defaultSurface;
+  _replaceRecord(SURFACES, b.surfaces as unknown as Record<string, SurfaceConfig>);
+  _replaceRecord(AUDIT_TARGETS, (b.auditTargets ?? {}) as typeof AUDIT_TARGETS);
+  Object.assign(SWEEP, b.sweep ?? _DEFAULTS.sweep);
+  DESIGN_IRREVERSIBLE.territoryGlobs = b.rails.territoryGlobs;
+  DESIGN_IRREVERSIBLE.keywords = b.rails.keywords;
+}
+
+/** Restore the built-in lifeofbash defaults (used by tests to avoid cross-contamination). */
+export function resetBinding(): void {
+  _defaultSurface = "tools";
+  _replaceRecord(SURFACES, _DEFAULTS.surfaces);
+  _replaceRecord(AUDIT_TARGETS, _DEFAULTS.auditTargets);
+  Object.assign(SWEEP, _DEFAULTS.sweep);
+  DESIGN_IRREVERSIBLE.territoryGlobs = _DEFAULTS.rails.territoryGlobs;
+  DESIGN_IRREVERSIBLE.keywords = _DEFAULTS.rails.keywords;
+}

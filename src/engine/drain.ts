@@ -379,14 +379,15 @@ export function defaultDrainDeps(cfg: {
         repoRoot: cfg.repoRoot,
         seedPaths: cfg.seedPaths,
         branch,
-        // organs needs a real Turbopack-capable node_modules; tools (bun) does not.
-        install: cfg.surface === "organs",
+        // A surface flagged needsRealInstall (e.g. Turbopack) gets a real install;
+        // others symlink node_modules from the primary checkout (below).
+        install: !!SURFACES[cfg.surface]?.needsRealInstall,
       });
       // The tools surface is bun/pnpm-managed and NOT installed in the worktree (no
       // Turbopack), so symlink node_modules from the primary checkout — without it the
       // bun gate chain can't resolve deps. organs got a real install above (a symlink
       // is rejected by Turbopack). See lessons.md [worktree].
-      if (cfg.surface !== "organs") {
+      if (!SURFACES[cfg.surface]?.needsRealInstall) {
         for (const rel of ["node_modules", "tools/node_modules"]) {
           const target = resolve(cfg.repoRoot, rel);
           const link = resolve(workPath, rel);

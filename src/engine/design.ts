@@ -19,8 +19,8 @@ import { CompletableItemSchema, type CompletableItem } from "./audit";
 /** The Design stage's output: the feature designed on its own merits, with its natural
  * home chosen from the surface roles — never reflexively organs. */
 export const FeatureDesignSchema = z.object({
-  /** The natural home, chosen from surface ROLES (never defaults to organs). */
-  surface: z.enum(["organs", "tools"]),
+  /** The natural home, chosen from surface ROLES (a key in the binding's surfaces). */
+  surface: z.string().min(1),
   /** Why this surface — must justify organs if chosen (it is the secondary view). */
   surfaceRationale: z.string().min(1),
   /** The feature's name (also the decomposition's dedup root). */
@@ -135,7 +135,7 @@ export function classifyIrreversible(
  */
 export function validateSurface(
   items: Pick<CompletableItem, "territory">[],
-  surface: "organs" | "tools",
+  surface: string,
 ): number[] {
   const dir = SURFACES[surface]?.dir ?? surface;
   const prefix = `${dir}/`;

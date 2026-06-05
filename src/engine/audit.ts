@@ -20,15 +20,15 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { normalizeMarkerText } from "./capture-sweep";
-import { AUDIT_TARGETS, AUDIT_FANOUT_MAX } from "./config";
+import { AUDIT_TARGETS, AUDIT_FANOUT_MAX, SURFACES, getDefaultSurface } from "./config";
 
 // ---------------------------------------------------------------------------
 // Zod schemas + inferred types
 // ---------------------------------------------------------------------------
 
 export const AuditPlanSchema = z.object({
-  /** Which project surface this target belongs to. */
-  surface: z.enum(["organs", "tools"]),
+  /** Which project surface this target belongs to (a key in the binding's surfaces). */
+  surface: z.string().min(1),
   /** The root glob that covers the whole target area. */
   rootGlob: z.string().min(1),
   /** Fan-out partitions for finder bashas (capped at AUDIT_FANOUT_MAX). */
@@ -136,8 +136,22 @@ export function auditFingerprint(item: Pick<CompletableItem, "title" | "territor
  * Infer the surface ("organs" | "tools") from a root glob or a path segment.
  * Falls back to "organs" for anything not obviously "tools".
  */
-function inferSurface(path: string): "organs" | "tools" {
-  return path.startsWith("tools") ? "tools" : "organs";
+function inferSurface(path: string): string {
+  // Pick the surface whose `dir` is the longest path-prefix of `path`. A surface
+  // with dir "." (whole repo) is the lowest-priority catch-all. If nothing matches,
+  // fall back to the binding's defaultSurface.
+  let best: string | null = null;
+  let bestLen = -1;
+  for (const [name, cfg] of Object.entries(SURFACES)) {
+    const dir = (cfg as { dir: string }).dir;
+    const isMatch = dir === "." ? true : path === dir || path.startsWith(dir + "/");
+    const len = dir === "." ? 0 : dir.length;
+    if (isMatch && len > bestLen) {
+      best = name;
+      bestLen = len;
+    }
+  }
+  return best ?? getDefaultSurface();
 }
 
 /** The repository root — resolved once at module-load time. */
