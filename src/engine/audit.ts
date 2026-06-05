@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { normalizeMarkerText } from "./capture-sweep";
-import { AUDIT_TARGETS, AUDIT_FANOUT_MAX, SURFACES, getDefaultSurface } from "./config";
+import { AUDIT_TARGETS, AUDIT_FANOUT_MAX, SURFACES, getDefaultSurface, getRepoRoot } from "./config";
 
 // ---------------------------------------------------------------------------
 // Zod schemas + inferred types
@@ -154,9 +154,8 @@ function inferSurface(path: string): string {
   return best ?? getDefaultSurface();
 }
 
-/** The repository root — resolved once at module-load time. */
-import { resolve } from "node:path";
-const REPO_ROOT = resolve(import.meta.dir, "..", "..");
+// The repository root comes from the injected binding (getRepoRoot), so audits read
+// the TARGET repo's directories, not this package's.
 
 /**
  * Resolve a human target string to an AuditPlan.
@@ -175,6 +174,17 @@ export function resolveTarget(target: string): AuditPlan {
       `resolveTarget: target must not be empty. Pass a registry key (e.g. "money") ` +
         `or a repo-relative directory path.`,
     );
+  }
+
+  // 0. Whole-repo target: "." → audit the default surface.
+  if (trimmed === "." || trimmed === "./") {
+    const surface = getDefaultSurface();
+    const dir = SURFACES[surface]?.dir ?? ".";
+    return AuditPlanSchema.parse({
+      surface,
+      rootGlob: dir === "." ? "**" : `${dir}/**`,
+      subAreas: genericSubAreasSync(dir),
+    });
   }
 
   // 1. Registry lookup (case-insensitive).
@@ -209,21 +219,26 @@ export function resolveTarget(target: string): AuditPlan {
 
 /** Synchronous version of genericSubAreas for the pure resolveTarget API. */
 function genericSubAreasSync(rootPath: string): string[] {
-  const abs = `${REPO_ROOT}/${rootPath}`;
+  const isRoot = rootPath === "." || rootPath === "" || rootPath === "./";
+  const abs = isRoot ? getRepoRoot() : `${getRepoRoot()}/${rootPath}`;
+  const prefix = isRoot ? "" : `${rootPath}/`;
   try {
     const { readdirSync } = require("node:fs") as typeof import("node:fs");
     const entries = readdirSync(abs, { withFileTypes: true });
     const dirEntries: string[] = [];
     for (const e of entries) {
-      if (e.isDirectory()) dirEntries.push(`${rootPath}/${e.name}/**`);
+      // Skip dependency + hidden dirs so a whole-repo audit never fans out into node_modules.
+      if (e.isDirectory() && e.name !== "node_modules" && !e.name.startsWith(".")) {
+        dirEntries.push(`${prefix}${e.name}/**`);
+      }
     }
     const hasLooseFiles = entries.some(
       (e) => e.isFile() && (e.name.endsWith(".ts") || e.name.endsWith(".tsx")),
     );
-    if (hasLooseFiles) dirEntries.push(`${rootPath}/*.{ts,tsx}`);
-    if (dirEntries.length === 0) return [`${rootPath}/**`];
+    if (hasLooseFiles) dirEntries.push(`${prefix}*.{ts,tsx}`);
+    if (dirEntries.length === 0) return [isRoot ? "**" : `${rootPath}/**`];
     return dirEntries.slice(0, AUDIT_FANOUT_MAX);
   } catch {
-    return [`${rootPath}/**`];
+    return [isRoot ? "**" : `${rootPath}/**`];
   }
 }

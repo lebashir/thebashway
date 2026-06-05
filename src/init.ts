@@ -80,7 +80,7 @@ export default defineThebashway({
       role: "The application — the default home for new features in this repo.",
       chain: [
 ${chainLines || "        // No build/test scripts detected — add your verify commands here."}
-      ],
+      ],${detect.isNext ? "\n      needsRealInstall: true, // Next/Turbopack: a worktree needs a real install, not a symlink" : ""}
     },
   },
   rails: {

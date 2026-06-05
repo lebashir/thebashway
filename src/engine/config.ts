@@ -1,6 +1,7 @@
 // tools/orchestrator/config.ts
 // The ONLY project-specific file in the orchestrator. A new project swaps this
 // out and keeps everything else. See the spec's "Portability" section.
+import { resolve } from "node:path";
 import type { SurfaceConfig } from "./verify/types";
 import type { ResolvedBinding } from "./binding";
 
@@ -246,15 +247,22 @@ function _replaceRecord<T>(target: Record<string, T>, src: Record<string, T>): v
 }
 
 let _defaultSurface = "tools";
+let _repoRoot = resolve(import.meta.dir, "..", "..");
 
 /** The binding's defaultSurface — where ambiguous work and unknown paths land. */
 export function getDefaultSurface(): string {
   return _defaultSurface;
 }
 
+/** The target repo's root (binding.repoRoot). Defaults to this package's root for tests. */
+export function getRepoRoot(): string {
+  return _repoRoot;
+}
+
 /** Override the project-specific binding values in place. Called once by the CLI at startup. */
 export function setBinding(b: ResolvedBinding): void {
   _defaultSurface = b.defaultSurface;
+  _repoRoot = b.repoRoot;
   _replaceRecord(SURFACES, b.surfaces as unknown as Record<string, SurfaceConfig>);
   _replaceRecord(AUDIT_TARGETS, (b.auditTargets ?? {}) as typeof AUDIT_TARGETS);
   Object.assign(SWEEP, b.sweep ?? _DEFAULTS.sweep);
@@ -265,6 +273,7 @@ export function setBinding(b: ResolvedBinding): void {
 /** Restore the built-in lifeofbash defaults (used by tests to avoid cross-contamination). */
 export function resetBinding(): void {
   _defaultSurface = "tools";
+  _repoRoot = resolve(import.meta.dir, "..", "..");
   _replaceRecord(SURFACES, _DEFAULTS.surfaces);
   _replaceRecord(AUDIT_TARGETS, _DEFAULTS.auditTargets);
   Object.assign(SWEEP, _DEFAULTS.sweep);

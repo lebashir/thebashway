@@ -2,7 +2,7 @@
 // zero lifeofbash leakage. setBinding swaps the project-specific values in place;
 // resetBinding restores the defaults so other test files are unaffected.
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { setBinding, resetBinding, SURFACES, AUDIT_TARGETS, getDefaultSurface } from "../engine/config";
+import { setBinding, resetBinding, SURFACES, AUDIT_TARGETS, getDefaultSurface, getRepoRoot } from "../engine/config";
 import { resolveTarget } from "../engine/audit";
 import { binding as nextjs } from "../../examples/nextjs-minimal.config";
 
@@ -31,6 +31,16 @@ test("resolveTarget infers the injected surface for a directory path", () => {
 
 test("a lifeofbash-only target no longer resolves under a different binding", () => {
   expect(() => resolveTarget("money")).toThrow(/cannot resolve target "money"/);
+});
+
+test("resolveTarget('.') maps to the default surface (whole-repo audit)", () => {
+  const plan = resolveTarget(".");
+  expect(plan.surface).toBe("app");
+  expect(plan.subAreas.length).toBeGreaterThan(0);
+});
+
+test("getRepoRoot reflects the injected binding", () => {
+  expect(getRepoRoot()).toBe("/tmp/nextjs-app");
 });
 
 test("resetBinding restores the lifeofbash defaults", () => {
