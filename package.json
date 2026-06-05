@@ -1,13 +1,13 @@
 {
   "name": "thebashway",
-  "version": "0.1.0",
-  "description": "Portable autonomous build-system method + engine: evidence-backed gates, parallel worktrees, fresh-agent review, leave-no-trace.",
+  "version": "0.2.0",
+  "description": "Portable autonomous build loop: Build Mode + Fix Mode for any code repo, driven by Claude with evidence-backed gates.",
   "type": "module",
   "private": true,
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
     "test": "bun test"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
   }
 }
