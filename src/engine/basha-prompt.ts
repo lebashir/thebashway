@@ -64,18 +64,27 @@ export function buildBashaPrompt(opts: BuildBashaPromptOptions): string {
 // The driver may use this, or may call buildBashaPrompt directly with pre-loaded lessons.
 export async function buildBashaPromptFromDisk(opts: {
   repoRoot: string;
-  lessonsPath: string;       // path to tools/orchestrator/lessons.md
+  lessonsPath: string;       // path to the LOCAL build lessons (binding.learning.local)
   taskBody: string;
   buildAreas?: string[];     // areas for relevantLessons() filtering
   operatingAreas?: string[]; // areas for operating-lessons filtering
+  // The GLOBAL operating-lessons store (binding.learning.global). Hybrid learning:
+  //   undefined → default to <repoRoot>/memory/operating-lessons.md (lifeofbash back-compat)
+  //   null      → no global store (a bare repo); use local build lessons only
+  //   string    → read the shared cross-project store at this path
+  operatingLessonsPath?: string | null;
 }): Promise<string> {
-  const { repoRoot, lessonsPath, taskBody, buildAreas = [], operatingAreas } = opts;
+  const { repoRoot, lessonsPath, taskBody, buildAreas = [], operatingAreas, operatingLessonsPath } = opts;
 
-  // Read operating lessons.
-  const ledgerPath = join(repoRoot, "memory", "operating-lessons.md");
-  const operatingLessons = existsSync(ledgerPath)
-    ? parseLessons(readFileSync(ledgerPath, "utf8")).active
-    : [];
+  // Read operating lessons (the global store).
+  const ledgerPath =
+    operatingLessonsPath === undefined
+      ? join(repoRoot, "memory", "operating-lessons.md")
+      : operatingLessonsPath;
+  const operatingLessons =
+    ledgerPath && existsSync(ledgerPath)
+      ? parseLessons(readFileSync(ledgerPath, "utf8")).active
+      : [];
 
   // Read build-loop lessons.
   const allBuildLessons = await readLessons(lessonsPath);
