@@ -1,91 +1,98 @@
-# thebashway — usage
+# thebashway — full reference
 
-Day-to-day use, the helper API, and the safety rails. For wiring a new project see
-`template/README.md`; for the philosophy + the loop see `README.md`.
+For the friendly intro, see [README.md](./README.md). This file is the complete command
+and settings reference.
 
-## Running the gate
+## Commands
 
-```bash
-# Full gate for a surface, scoped to a unit's territory, vs a base ref:
-bun run tools/orchestrator/verify.ts \
-  --surface app \
-  --base origin/main \
-  --territory "app/src/sections/settings/**" \
-  --territory "app/src/registry.ts"
+| Command | What it does |
+|---|---|
+| `thebashway init [--global <path>]` | Detect how the repo builds, write `thebashway.config.ts` + a `.thebashway/` store. `--global` points the shared lessons file at a cross-project store. |
+| `thebashway fix <target> [--dry-run] [--no-land]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging. |
+| `thebashway build "<feature>" [--dry-run] [--no-drain]` | **Build Mode.** Design → decompose → safety-gate → build a small feature. `--dry-run` designs + prints only. `--no-drain` enqueues without building. |
+| `thebashway "<request>"` | Auto-route the request to Build or Fix. |
+| `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
+| `thebashway check-sync` | Report commits to the lifeofbash engine since this package was last reconciled (drift). |
+| `--config <path>` | (Any command) use a binding file other than `./thebashway.config.ts`. |
 
-# Flags:
-#   --surface <name>     which surface from config.ts (required)
-#   --base <ref>         git ref to diff against (default HEAD)
-#   --territory <glob>   allowed files (repeatable); omit to skip scope-diff
-#   --json               print the manifest as JSON
-# Exit code: 0 = pass, 1 = fail, 2 = bad usage. A manifest is written to
-# .verify-manifest.json (gitignored).
-```
+A `target` for `fix`/`audit-plan` is either a **registered name** (a key in
+`auditTargets`) or a **repo-relative path** that contains a `/` (e.g.
+`src/components/Cart.tsx`).
 
-`verify` runs scope-diff → required-touches → freshness → gate-chain → smoke, and
-emits a tamper-evident manifest (diff hash + output hash + territory).
+## The settings file (`thebashway.config.ts`)
 
-## The loop, run by a session
-
-A session invokes the `thebashway` skill and works one queue item at a time.
-(The dispatched workers are **bashas**: a single *basha*; specialized ones are
-*building / planning / thinking / designing / reviewing* bashas.)
-
-1. **Intake** — clarify the item's *shape* with the human at add-time; write a
-   self-contained entry to `queue.md`.
-2. **Claim** — `claimNext(session, branch, queuePath)` (lock-guarded).
-3. **Spec + cold review** — a reviewing basha, spec as its only input.
-4. **Slice + build** — building bashas; disjoint territories, isolated worktrees, ≤3–4 parallel. Prime each basha with `formatForPrompt(relevantLessons(await readLessons(lessonsPath), [surface]))`.
-5. **`verify`** each chunk; keep the manifest.
-6. **Diff review** — a reviewing basha, diff + spec as input; requires the manifest.
-7. **Integrate** — serial merges, re-verify after each.
-8. **Deploy + smoke** — auto-roll-back on failure; `markBlocked` with the reason.
-9. **Cleanup** — `assertClean(branchPattern)` after worktree teardown.
-10. **Digest** — `appendDigest(log, record)` + `summaryLine(record)` to NOW.
-
-## Helper API (import from `thebashway`)
+`init` writes this; you usually only touch `surfaces.*.chain`. Full shape:
 
 ```ts
-import {
-  runVerify,                    // the gate engine (config-driven)
-  recheckManifest,              // driver recomputes the diff hash vs git (trust check)
-  withLock,                     // exclusive-create lockfile mutex (multi-session)
-  claimNext, markBlocked, markDone, appendItem,  // queue ops (lock-guarded)
-  parseQueue, serializeItem,    // queue.md <-> QueueItem
-  assertClean,                  // leave-no-trace assertion
-  shouldTrip, overBudget,       // circuit breaker + runaway budget
-  formatRecord, summaryLine, appendDigest,        // run digest
-  classifyChanges, checkRequiredTouches, checkFreshness, freePort, // gate pieces
-  readLessons, relevantLessons, formatForPrompt, appendLesson,     // learn from past mistakes
-} from "thebashway";
+import { defineThebashway } from "thebashway/binding";
+
+export default defineThebashway({
+  repoRoot: import.meta.dir,
+  defaultSurface: "app",          // ambiguous work lands here; must be a surface key
+
+  surfaces: {                     // one entry per buildable area of the repo
+    app: {
+      dir: ".",                   // path from repoRoot
+      role: "...",                // prose Build Mode reads to choose a home
+      chain: [                    // the gate: commands run in order; non-zero = fail
+        { name: "typecheck", cmd: ["pnpm", "exec", "tsc", "--noEmit"] },
+        { name: "test",      cmd: ["pnpm", "test"] },
+        { name: "build",     cmd: ["pnpm", "build"] },
+      ],
+      derived: [],                // optional: committed files kept in sync
+      regen: null,                // optional: command that regenerates `derived`
+      smoke: null,                // optional: prod-render smoke on an ephemeral port
+      needsRealInstall: false,    // true if a worktree needs a real install (e.g. Turbopack)
+      stageNotDeploy: false,      // true to stage for review instead of auto-deploying
+    },
+  },
+
+  rails: {                        // the safety gate (see below)
+    territoryGlobs: [],           // folders that are person-reaching by default
+    keywords: /\b(send|email|delete|deploy)\b/i,
+  },
+
+  learning: {
+    global: null,                 // shared cross-project lessons file (read), or null
+    local: ".thebashway/lessons.md",     // this repo's lessons (read + write)
+    decisions: ".thebashway/decisions.md",
+  },
+
+  sinks: { /* notify, eventSink, statusFile — all optional, default no-ops */ },
+  breaker: { maxFailures: 2, window: 3 },
+  maxConcurrent: 6,
+  seedPaths: [],                  // gitignored files a worktree needs (e.g. .env.local)
+});
 ```
 
-- `recheckManifest(manifestPath, repoRoot)` — the integrity check the **driver**
-  runs before cold-review (the reviewer never self-validates).
-- `shouldTrip(recentOutcomes, maxFailures, window)` — sliding-window circuit
-  breaker (not "N consecutive").
-- `overBudget(used, limit)` — per-item runaway guard.
-- **Lessons (learn from mistakes):** `readLessons(path)` → `relevantLessons(ls, [area])`
-  → `formatForPrompt(...)` injects "Known pitfalls — do not repeat" into a basha's
-  prompt. On any gate/review catch, `appendLesson(path, { tag, rule })` records it
-  (dedup automatic). General lessons graduate into the skill.
+## The safety rails
 
-## Safety rails (never autonomous)
+Before anything is built unattended, every task is checked against `rails`:
 
-The loop may build, deploy, roll back, redeploy, run schema changes. It will NOT,
-without a human: (a) destroy unrecoverable data, (b) send anything that reaches
-other people, or (c) deploy a change to a surface smoke cannot exercise
-(background jobs, webhooks) until smoke covers it.
+- if its text (or the files it would touch) match `rails.keywords` — send/email/delete/
+  deploy/etc — it is **set aside for your approval**, never built automatically;
+- if its files fall under a `rails.territoryGlobs` folder, same thing.
 
-## Tuning (per project)
+This is deliberately over-cautious: a false "ask the human" costs you one glance; a false
+"go ahead" could message someone or delete data. You can widen the rails per project.
 
-- circuit-breaker window: `shouldTrip(recent, X, Y)` — pick X failures in last Y.
-- runaway budget: turns / tool-calls / wall-clock per item.
-- concurrency cap: ~3–4 parallel units.
-- smoke port range: ephemeral by default (`freePort`).
+## The learning stores
 
-## Tests
+- **local** (`.thebashway/lessons.md`) — mistakes caught while building *this* repo, fed
+  back into future runs so they aren't repeated. Written automatically.
+- **global** (optional) — a shared file every project reads, so a lesson learned once is
+  reused everywhere. Point `learning.global` at it (e.g. a central
+  `operating-lessons.md`).
 
-```bash
-bun test        # the generic engine + helper suite
-```
+## How a run actually flows
+
+1. **preflight** — make sure the branch is clean and pushed.
+2. **claim** — take an item off the queue (`.thebashway/queue.md`).
+3. **build** — a headless `claude` works the item on a fresh branch/worktree.
+4. **verify** — run the surface's `chain` (your build/test) as evidence.
+5. **integrate** — merge into a staging branch and re-verify.
+6. **land** — merge to your main branch (unless `--no-land` or the surface is
+   `stageNotDeploy`).
+7. **learn** — record any mistake a gate caught into the local lessons.
+
+A circuit breaker halts the loop if too many items fail in a row.

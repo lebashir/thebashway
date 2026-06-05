@@ -1,110 +1,129 @@
 # thebashway
 
-> **STALE — reference only (as of 2026-06-04).** The live, canonical thebashway lives in
-> `lifeofbash/tools/orchestrator/`. It has moved well past this extract — the staged
-> self-building loop (the `@needs-intake` build-ready gate, `add`/`mark-ready` capture +
-> intake, the Loop A decision store, the question-ledger, the codified drain protocol) is
-> NOT here. This standalone copy froze on 2026-05-28 and has drifted on the skill and
-> several files. Do not bootstrap a new project from it without reconciling against the
-> in-repo source first. Kept as a historical record of the extraction.
+A helper that lets Claude build and fix code in your project on its own — safely.
+You give it a one-line request; it does the work on a side branch, checks its own
+work, and only keeps changes that pass.
 
-A build system for AI-driven software work. When you let AI agents write code, they
-tell you they're "done" and you get surprised later. thebashway is the discipline that
-stops the surprises: a *method* (a Claude Code skill) plus an *engine* (executable gates
-and driver helpers) that let agents build in parallel, with each step forced to prove its
-work to the next one.
+It has two modes:
 
-It was extracted from the `lifeofbash` project, where it was designed and hardened against
-four real mid-course failures, and made reusable across any project.
+- **Fix** — point it at a file, folder, or your whole project and say what's wrong (or
+  just let it look for problems). It finds real issues and fixes them.
+- **Build** — describe a small feature in one line. It plans it, builds it, and checks it.
 
-## The one idea
+You can pick the mode yourself (`fix` / `build`) or just type what you want and let it
+choose.
 
-Evidence before assertions. Nothing trusts a claim, not an agent's "done" and not a gate's
-"looks fine." Every stage hands the next stage proof that the next stage re-checks: the
-changed-file set is diffed, gates emit their raw output, and a tamper-evident manifest of
-content hashes is recomputed by the driver before anything downstream runs.
+---
 
-## The loop
+## What you need first
 
-Each piece of work moves through one path: intake (clarify the shape, write a queue entry),
-claim it, draft a spec, cold-review that spec, slice it into chunks that touch separate
-territory, build those chunks in parallel in isolated git worktrees, run `verify` on each,
-review the diffs, integrate serially while re-verifying after every merge, deploy and smoke
-test with automatic rollback if anything breaks, assert that no mess was left behind, then
-log a digest line.
+Three things. Each has a quick check you can paste into your terminal.
 
-The workers that do the building are called *bashas* (one is a basha; specialized kinds are
-planning, building, thinking, designing, and reviewing bashas). The "driver" is a Claude Code
-session running the thebashway skill plus the helpers below, not a standalone program calling
-an LLM API.
+1. **Bun** (it runs the tool). Check: `bun --version` — if you see a number, you're good.
+   No bun? Install from https://bun.sh.
+2. **The `claude` command** (this is what actually writes the code). Check: `claude --version`.
+   No claude? Install Claude Code first.
+3. **Your project is in git.** Check: run `git status` inside your project — if it doesn't
+   error, you're good. Not in git? Run `git init` once.
 
-Bashas learn from mistakes. Each one is primed with the project's accumulated lessons
-(`lessons.md`, past pitfalls grouped by area), and a new lesson is appended whenever a gate or
-a reviewing basha catches a real mistake, so later bashas don't repeat it.
+That's it. You don't need any database, account, or API key.
 
-## The gates (`verify`)
+---
 
-For each surface, `verify` runs these checks and emits a manifest:
+## Install (3 steps)
 
-- **scope-diff:** changed files stay inside the unit's declared territory.
-- **required-touches:** declared changes also touch the companion files they oblige (the
-  inverse guard, defined by your own rules).
-- **freshness:** generated artifacts aren't stale; the real build actually runs.
-- **gate chain:** tsc, lint, tests, build.
-- **smoke:** each route returns 200 with a positive marker, on an ephemeral port.
+1. **Get thebashway** (once, anywhere on your machine):
 
-## What's portable vs. what's yours
+   ```
+   git clone <thebashway-repo> ~/thebashway
+   cd ~/thebashway && bun install
+   ```
 
-The left column ships with the package. The right column is the thin wiring each project adds.
+2. **Make the command easy to type** (optional but nice):
 
-| The package (portable) | Your project (wiring) |
-|---|---|
-| `skill/SKILL.md`, the method | `config.ts`, your surfaces and commands |
-| `src/verify/*`, the gate engine | `required-touches.ts`, your rules |
-| `src/*.ts` helpers (lock, queue, manifest-check, cleanup, breaker, digest, lessons) | `queue.md` (live queue) and `lessons.md` (learning log) |
-| `runVerify()`, the config-driven entry point | `verify.ts`, a thin entry that calls `runVerify` |
+   ```
+   cd ~/thebashway && bun link
+   ```
 
-## Quickstart
+   Now you can type `thebashway` anywhere. (Skip this and you can always run it the long
+   way: `bun run ~/thebashway/src/cli.ts ...`.)
 
-Install the method once, globally:
+3. **Set it up in your project** — go to your project folder and run:
 
-```bash
-./install.sh        # symlinks skill/ into ~/.claude/skills/thebashway
-```
+   ```
+   thebashway init
+   ```
 
-Any Claude Code session can now invoke the thebashway skill.
+   It looks at your project, figures out how you build and test, and writes a small
+   settings file (`thebashway.config.ts`). It prints what it detected — **read that line
+   and make sure the build/test commands look right.** If they don't, open
+   `thebashway.config.ts` and fix the `chain` list. That's the only thing you might edit.
 
-To wire a project for the executable gates, see `template/README.md`: copy the four template
-files into `tools/orchestrator/`, add thebashway as a `file:` dependency, edit `config.ts`,
-then run:
+---
 
-```bash
-bun run tools/orchestrator/verify.ts --surface app --base <ref>
-```
+## Use it
 
-## Layout
+Two things you can type. Run them from inside your project.
+
+**Fix something:**
 
 ```
-skill/SKILL.md          the portable method (install.sh symlinks it into ~/.claude/skills)
-src/                    the engine: verify/ (gates) plus helpers plus runVerify
-src/verify/__tests__/   the generic test suite (bun test)
-template/               copy-into-a-project starter (config, rules, queue, lessons, verify entry)
-USAGE.md                day-to-day: running verify, the helper API, the rails
+thebashway fix src/components/Cart.tsx
 ```
 
-## Applicability envelope
+It looks at that file, finds real problems, fixes them on a branch named `tbw/...`, runs
+your tests, and — if everything passes — keeps the changes. You'll see a short summary of
+what it found and did. (Want it to stop before merging so you can look first? Add
+`--no-land`.)
 
-This assumes a JS/TS repo with a build step and HTTP routes, a git working tree, and Bun. Off
-that shape (a Python CLI, a serverless library), adapt `config.ts` deliberately: smoke becomes
-a CLI exit-code check, and you drop the build and freshness checks if there is no build step.
-The skill spells out these adaptations.
+**Build something:**
 
-## Status
+```
+thebashway build "add a button that exports the table to CSV"
+```
 
-Extracted 2026-05-27 from lifeofbash. The engine, helpers, and skill are complete and tested
-(`bun test`). The autonomous loop is run by a session following the skill; an unattended daemon
-is future work.
+It plans the feature, builds it on a branch, runs your tests, and shows you the result.
+(Want to just see the plan without building? Add `--dry-run`.)
 
-## License and ownership
+**Or just say what you want** and let it choose the mode:
 
-Personal tooling. Mine and portable by design.
+```
+thebashway "the date on the receipt is off by one day"
+```
+
+---
+
+## What it does behind the scenes
+
+1. It works on a **separate branch**, never directly on your main code.
+2. It **checks its own work** by running your real build and tests.
+3. It **only keeps changes that pass** — if the tests fail, the work stays on the branch.
+4. It **asks you first** before anything it can't take back (see Safety below).
+5. It **remembers mistakes** so it doesn't repeat them next time.
+
+---
+
+## Safety
+
+thebashway will **never** send an email, message a person, delete data, or deploy to
+production on its own. Anything like that is automatically set aside and flagged for you to
+approve. It leans cautious on purpose: if a task even *looks* like it might reach a real
+person or destroy something, it stops and asks. The worst case is it asks you about
+something harmless — never that it does something it shouldn't.
+
+---
+
+## When something goes wrong
+
+- **"no binding found ..."** — you haven't set up this project yet. Run `thebashway init`.
+- **"the `claude` command is not on your PATH"** — install Claude Code, then try again.
+- **The build/test step failed and nothing got kept** — that's working as intended; the
+  change is still on its `tbw/...` branch. Check `thebashway.config.ts` to make sure the
+  build/test commands match how your project really builds.
+- **Nothing happened / it found nothing** — try pointing `fix` at a specific file or folder
+  instead of the whole project.
+
+---
+
+For the full command reference and settings, see [USAGE.md](./USAGE.md).
+For how this relates to the lifeofbash project it came from, see [SYNC.md](./SYNC.md).
