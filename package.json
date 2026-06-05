@@ -4,8 +4,17 @@
   "description": "Portable autonomous build loop: Build Mode + Fix Mode for any code repo, driven by Claude with evidence-backed gates.",
   "type": "module",
   "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./binding": "./src/binding.ts"
+  },
+  "bin": {
+    "thebashway": "./src/cli.ts"
+  },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "thebashway": "bun run src/cli.ts",
+    "check-sync": "bun run src/check-sync.ts"
   },
   "dependencies": {
     "zod": "^3.23.0"
