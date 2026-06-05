@@ -194,17 +194,25 @@ export function resolveTarget(target: string): AuditPlan {
     return AuditPlanSchema.parse(registryEntry);
   }
 
-  // 2. Generic fallback: treat as a repo-relative directory path.
-  // Only accept strings that look like a relative path (contain "/" or look like
-  // a directory name) — reject bare words that look like typos.
-  if (trimmed.includes("/")) {
-    // Treat as a repo-relative directory path; partition its children synchronously.
-    const surface = inferSurface(trimmed);
-    const subAreasSync = genericSubAreasSync(trimmed);
+  // 2. Directory target: a path containing "/", OR a bare name that is an existing
+  //    directory in the repo (so `fix lib` works, not only `fix lib/foo`). Trailing
+  //    slashes are stripped so `fix lib/` never yields a `lib//**` glob.
+  const cleaned = trimmed.replace(/\/+$/, "");
+  const isExistingDir = (() => {
+    try {
+      const { existsSync, statSync } = require("node:fs") as typeof import("node:fs");
+      const abs = `${getRepoRoot()}/${cleaned}`;
+      return existsSync(abs) && statSync(abs).isDirectory();
+    } catch {
+      return false;
+    }
+  })();
+  if (cleaned.includes("/") || isExistingDir) {
+    const surface = inferSurface(cleaned);
     return AuditPlanSchema.parse({
       surface,
-      rootGlob: `${trimmed}/**`,
-      subAreas: subAreasSync,
+      rootGlob: `${cleaned}/**`,
+      subAreas: genericSubAreasSync(cleaned),
     });
   }
 
