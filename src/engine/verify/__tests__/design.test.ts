@@ -238,6 +238,26 @@ test("happy path (tools): design → decompose → approve → enqueue build-rea
   cleanup(q);
 });
 
+test("--no-land: a deployable (tools) feature builds + integrates but STAGES instead of deploying", async () => {
+  const q = await emptyQueue();
+  const { deps, calls } = stubDeps({
+    designs: [fd({ surface: "tools", title: "Amount parser" })],
+    tasks: [[ci({ title: "Add parseAmount", territory: ["tools/orchestrator/parse.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true, reason: "" }] })],
+    drain: drainReport({ claimed: ["Add parseAmount"], succeeded: ["Add parseAmount"] }),
+    landOk: true,
+  });
+  const report = await runFeatureDesign(
+    { description: "parse amounts to fils", queuePath: q, repoRoot: ".", decisionsPath: ".", noLand: true },
+    deps,
+  );
+  expect(calls.drain).toBe(1); // still builds
+  expect(calls.land).toBe(0); // ...but does NOT deploy
+  expect(report.landed).toBe(false);
+  expect(report.landResult).toContain("no-land");
+  cleanup(q);
+});
+
 test("SAFETY: a person-reaching task is forced @needs-intake even when the cold review says build-ready and the run is freeze-authorized", async () => {
   const q = await emptyQueue();
   const { deps, calls } = stubDeps({

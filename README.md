@@ -105,11 +105,18 @@ thebashway "the date on the receipt is off by one day"
 
 ## Safety
 
-thebashway will **never** send an email, message a person, delete data, or deploy to
-production on its own. Anything like that is automatically set aside and flagged for you to
-approve. It leans cautious on purpose: if a task even *looks* like it might reach a real
-person or destroy something, it stops and asks. The worst case is it asks you about
-something harmless — never that it does something it shouldn't.
+thebashway **ships by default**: once a change passes your real build and tests on its branch,
+it merges to your main branch and deploys — that's the point of the loop. To stop short of
+deploying, pass `--no-land` and it builds + integrates, then leaves the change staged on a
+branch for you. (A brand-new web page is also staged rather than deployed, since an automated
+smoke test can't exercise a route it has never seen.)
+
+What it will **never** do on its own: send an email, message a person, or delete/destroy data.
+Anything like that is automatically set aside and flagged for you to approve — and it leans
+cautious on purpose: if a task even *looks* like it might reach a real person or destroy
+something, it stops and asks. (Deploys don't fall in this bucket — a deploy is reversible, you
+can roll it back, whereas a sent email or a deleted row is not.) The worst case is it asks you
+about something harmless — never that it does something it shouldn't.
 
 ---
 

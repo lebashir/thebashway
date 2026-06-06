@@ -63,6 +63,10 @@ export interface DesignOptions {
   /** Invocation-bound freeze authorization. Interactive CLI = true; scheduled = false. */
   freezeAuthorized?: boolean;
   maxTasks?: number;
+  /** Opt OUT of deploying this run: build + integrate but STAGE at the green branch instead of
+   * landing to main. Deploy is the DEFAULT (`--no-land` sets this) — the only per-run "told not
+   * to". Surfaces that always stage (e.g. a web UI) and the people/data rails are separate. */
+  noLand?: boolean;
 }
 
 export interface DesignReport {
@@ -285,7 +289,9 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
   const built = new Set(drain.succeeded);
   const notBuilt = buildReadyTitles.filter((t) => !built.has(t));
   const stageOnly = !!SURFACES[surface]?.stageNotDeploy;
-  const canLand = notBuilt.length === 0 && !drain.breakerTripped && !stageOnly;
+  // Deploy is the DEFAULT; canLand is false only when something genuinely blocks it — a per-run
+  // --no-land opt-out, a stage-only surface, an unbuilt/blocked member, or a tripped breaker.
+  const canLand = notBuilt.length === 0 && !drain.breakerTripped && !stageOnly && !opts.noLand;
 
   let landed = false;
   let landResult: string;
@@ -296,7 +302,9 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
       ? `landed ${drain.integrationBranch} → main + pushed (deployed)`
       : `LAND FAILED (safe at ${drain.integrationBranch}): ${res.reason ?? "unknown"}`;
   } else {
-    const reason = stageOnly
+    const reason = opts.noLand
+      ? "--no-land: built + integrated, staged for your review (you opted out of deploy)"
+      : stageOnly
       ? "this surface stages for review (a smoke test cannot exercise a new route)"
       : notBuilt.length > 0
         ? `${notBuilt.length} of ${buildReadyTitles.length} member(s) not built (${drain.blocked.length} blocked) — staged, not deployed (no half-built feature)`
