@@ -1,8 +1,0 @@
-{
-  "name": "thebashway",
-  "version": "0.2.0",
-  "description": "Autonomous Build Mode + Fix Mode for any code repo, driven by Claude with evidence-backed gates and human-approval rails.",
-  "author": "Bashir Abi Habib",
-  "commands": "./commands",
-  "skills": "./skill"
-}

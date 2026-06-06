@@ -30,34 +30,51 @@ That's it. You don't need any database, account, or API key.
 
 ---
 
-## Install (3 steps)
+## Install
 
-1. **Get thebashway** (once, anywhere on your machine):
+thebashway comes in **two pieces**, and you want both:
 
-   ```
-   git clone <thebashway-repo> ~/thebashway
-   cd ~/thebashway && bun install
-   ```
+- the **engine** — the Bun program that does the work (you run it as `thebashway …`);
+- the **method** — the skill + slash commands that teach Claude *how* to drive it.
 
-2. **Make the command easy to type** (optional but nice):
+(They're separate on purpose: a Claude Code plugin can't run an install step, so the Bun
+engine can't ride inside the plugin. Setting up the engine is quick.)
 
-   ```
-   cd ~/thebashway && bun link
-   ```
+**1. Get the engine** (once, anywhere on your machine):
 
-   Now you can type `thebashway` anywhere. (Skip this and you can always run it the long
-   way: `bun run ~/thebashway/src/cli.ts ...`.)
+```
+git clone https://github.com/lebashir/thebashway ~/thebashway
+cd ~/thebashway && bun install && bun link
+```
 
-3. **Set it up in your project** — go to your project folder and run:
+`bun link` lets you type `thebashway` from anywhere. (Skip it and run the long way:
+`bun run ~/thebashway/src/cli.ts …`.)
 
-   ```
-   thebashway init
-   ```
+**2. Get the method into Claude.** Pick one:
 
-   It looks at your project, figures out how you build and test, and writes a small
-   settings file (`thebashway.config.ts`). It prints what it detected — **read that line
-   and make sure the build/test commands look right.** If they don't, open
-   `thebashway.config.ts` and fix the `chain` list. That's the only thing you might edit.
+- **Plugin marketplace** (recommended — discoverable, and it updates with `claude plugin update`):
+
+  ```
+  claude plugin marketplace add lebashir/thebashway
+  claude plugin install thebashway@thebashway
+  ```
+
+- **Or straight from the clone** (simplest if you already cloned the engine):
+
+  ```
+  ~/thebashway/install.sh
+  ```
+
+**3. Set it up in your project** — go to your project folder and run:
+
+```
+thebashway init
+```
+
+It looks at your project, figures out how you build and test, and writes a small settings file
+(`thebashway.config.ts`). It prints what it detected — **read that line and make sure the
+build/test commands look right.** If they don't, open `thebashway.config.ts` and fix the
+`chain` list. That's the only thing you might edit.
 
 ---
 
@@ -95,26 +112,31 @@ thebashway "the date on the receipt is off by one day"
 
 ## Keeping it up to date
 
-You installed thebashway **once** in one place (the `~/thebashway` clone). Every project you
-run it in just points back at that one clone — `thebashway init` only writes a small settings
-file into your project, never a copy of the tool. So to get the latest version, update that one
-clone:
+Two pieces, two one-liners (run them now and then):
+
+**Engine:**
 
 ```
 thebashway update
 ```
 
-That pulls the newest version (fast-forward only) and reinstalls anything that changed. One
-update reaches **every** project you use thebashway in — and your per-project settings
-(`thebashway.config.ts`) and history (`.thebashway/`) are left exactly as they are. If you
-linked the command with `bun link`, there's nothing to re-link; if you installed the skill via
-`install.sh`, it's a symlink, so it follows along too.
+You installed the engine **once** in one place (the `~/thebashway` clone). Every project just
+points back at that clone — `thebashway init` only writes a small settings file into your
+project, never a copy of the tool. So `thebashway update` (a fast-forward pull + reinstall of
+anything that changed) reaches **every** project you use it in at once, and leaves your
+per-project settings (`thebashway.config.ts`) and history (`.thebashway/`) exactly as they are.
+(The long way, if you skipped `bun link`: `cd ~/thebashway && git pull && bun install`.) If it
+says you have **local uncommitted changes**, you edited something inside the clone — commit or
+stash first; if it says it **isn't a git checkout**, re-install from source.
 
-(The long way, if you skipped `bun link`: `cd ~/thebashway && git pull && bun install`.)
+**Method** (the Claude skill + commands):
 
-If `update` says you have **local uncommitted changes**, you edited something inside the clone —
-commit or stash it first. If it says it **isn't a git checkout**, you installed it some other way;
-re-install from source.
+```
+claude plugin update thebashway
+```
+
+If you installed the method from the clone with `install.sh` instead of the marketplace, it's a
+symlink — so `thebashway update` already refreshed it and there's nothing else to do.
 
 ---
 
