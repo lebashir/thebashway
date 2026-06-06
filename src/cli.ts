@@ -96,7 +96,8 @@ function tlsGuard(): void {
 async function cmdInit(cwd: string, args: string[]): Promise<number> {
   const gIdx = args.indexOf("--global");
   const globalLessons = gIdx >= 0 ? args[gIdx + 1] : null;
-  const r = await runInit(cwd, { globalLessons });
+  const enablePlugin = !args.includes("--no-enable-plugin");
+  const r = await runInit(cwd, { globalLessons, enablePlugin });
   console.log(initMessage(r));
   return r.prereqs.git ? 0 : 1;
 }
@@ -242,7 +243,10 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
 function usage(): void {
   console.log(`thebashway — autonomous Build + Fix for your repo
 
-  thebashway init [--global <path>]      scaffold thebashway.config.ts + .thebashway/ store
+  thebashway init [--global <path>] [--no-enable-plugin]
+                                         scaffold thebashway.config.ts + .thebashway/ store, and
+                                         enable the plugin for THIS repo (.claude/settings.json);
+                                         --no-enable-plugin skips the enable (e.g. install.sh users)
   thebashway fix <target> [--dry-run] [--no-land]
                                          FIX: audit a file/dir/registry target, build the findings
   thebashway build "<feature>" [--dry-run] [--no-drain]

@@ -1,6 +1,6 @@
 {
   "name": "thebashway",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Portable autonomous build loop: Build Mode + Fix Mode for any code repo, driven by Claude with evidence-backed gates.",
   "type": "module",
   "private": true,

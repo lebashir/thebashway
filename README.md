@@ -96,15 +96,17 @@ So you can install once and keep it **off by default**, switching it on only whe
 claude plugin install thebashway@thebashway
 claude plugin disable thebashway          # off everywhere by default
 
-# in each repo where you use thebashway:
+# in each repo where you use thebashway — one step:
 thebashway init
-claude plugin enable thebashway --scope project
 ```
 
-`--scope project` records the choice in that repo's `.claude/settings.json`
-(`"enabledPlugins": { "thebashway@thebashway": true }`) — committable, so teammates who clone it
-get prompted to enable it too. Repos you never touch never load the skill (no extra tokens, no
-noise).
+`thebashway init` sets up the engine **and** enables the plugin for that repo: it merges
+`"enabledPlugins": { "thebashway@thebashway": true }` into the repo's `.claude/settings.json`
+(preserving anything already there). That file is committable, so teammates who clone the repo get
+prompted to enable it too. Repos you never `init` never load the skill — no extra tokens, no noise.
+
+(Installed the method via `install.sh` instead of the plugin? Run `thebashway init
+--no-enable-plugin` to skip that step.)
 
 ---
 

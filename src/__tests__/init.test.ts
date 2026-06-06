@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectProject, runInit } from "../init";
+import { detectProject, runInit, enablePluginInSettings, PLUGIN_ID } from "../init";
 
 function tmpRepo(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "tbw-init-"));
@@ -63,4 +63,64 @@ test("runInit threads a global lessons path into the config when given", async (
   await runInit(dir, { globalLessons: "/Users/x/lifeofbash/memory/operating-lessons.md" });
   const cfg = readFileSync(join(dir, "thebashway.config.ts"), "utf8");
   expect(cfg).toContain('global: "/Users/x/lifeofbash/memory/operating-lessons.md"');
+});
+
+// --- per-project plugin activation (the nice-to-have) ---
+
+test("enablePluginInSettings: absent settings → fresh file with the plugin enabled", () => {
+  const r = enablePluginInSettings(null);
+  expect(r.status).toBe("added");
+  expect(JSON.parse(r.content).enabledPlugins[PLUGIN_ID]).toBe(true);
+});
+
+test("enablePluginInSettings: PRESERVES existing keys + other enabled plugins", () => {
+  const raw = JSON.stringify({
+    model: "opus",
+    enabledPlugins: { "other@mkt": true },
+    permissions: { allow: ["Bash(ls)"] },
+  });
+  const r = enablePluginInSettings(raw);
+  expect(r.status).toBe("added");
+  const out = JSON.parse(r.content);
+  expect(out.model).toBe("opus"); // untouched
+  expect(out.permissions.allow).toEqual(["Bash(ls)"]); // untouched
+  expect(out.enabledPlugins["other@mkt"]).toBe(true); // other plugin kept
+  expect(out.enabledPlugins[PLUGIN_ID]).toBe(true); // ours added
+});
+
+test("enablePluginInSettings: already-enabled → unchanged", () => {
+  const raw = JSON.stringify({ enabledPlugins: { [PLUGIN_ID]: true } });
+  const r = enablePluginInSettings(raw);
+  expect(r.status).toBe("already");
+  expect(r.content).toBe(raw); // byte-identical, no rewrite
+});
+
+test("enablePluginInSettings: malformed JSON is left UNTOUCHED (never clobber)", () => {
+  const raw = "{ not valid json ";
+  const r = enablePluginInSettings(raw);
+  expect(r.status).toBe("malformed");
+  expect(r.content).toBe(raw);
+});
+
+test("runInit enables the plugin in .claude/settings.json by default, merge-safe", async () => {
+  const dir = tmpRepo({ "package.json": JSON.stringify({ scripts: { test: "echo t" } }) });
+  mkdirSync(join(dir, ".claude"), { recursive: true });
+  writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ model: "opus" }));
+
+  const r = await runInit(dir);
+  expect(r.pluginEnabled).toBe("added");
+  const s = JSON.parse(readFileSync(join(dir, ".claude/settings.json"), "utf8"));
+  expect(s.model).toBe("opus"); // preserved
+  expect(s.enabledPlugins[PLUGIN_ID]).toBe(true);
+
+  // idempotent: a second init reports "already" and doesn't rewrite
+  const r2 = await runInit(dir);
+  expect(r2.pluginEnabled).toBe("already");
+});
+
+test("runInit --no-enable-plugin (enablePlugin:false) writes no settings file", async () => {
+  const dir = tmpRepo({ "package.json": JSON.stringify({ scripts: { test: "echo t" } }) });
+  const r = await runInit(dir, { enablePlugin: false });
+  expect(r.pluginEnabled).toBe("skipped");
+  expect(existsSync(join(dir, ".claude/settings.json"))).toBe(false);
 });
