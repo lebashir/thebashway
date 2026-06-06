@@ -47,6 +47,11 @@ export const FindingSchema = z.object({
   confidence: z.number().min(0).max(1),
   /** Whether the fix is safe inside the existing freeze policy (no new organ UI). */
   freezeSafe: z.boolean(),
+  /** Finder kind: omitted/undefined = a correctness defect (default); "design" = a
+   * design-quality / design-system deviation from the design finder. Design findings are
+   * ADVISORY — runAudit forces them @needs-intake (taste is human-gated). The design-finder
+   * prompt MUST emit "kind":"design" or it is treated as correctness. */
+  kind: z.enum(["correctness", "design"]).optional(),
 });
 export type Finding = z.infer<typeof FindingSchema>;
 
@@ -83,6 +88,10 @@ export const CompletableItemSchema = z.object({
   /** Design-decompose flag: the task deletes / destroys unrecoverable data. Forced
    * @needs-intake by the same gate. */
   destructive: z.boolean().optional(),
+  /** Stamped by runAudit when the source finding was a design finding. Carries design provenance
+   * through shaping; runAudit also forces such items @needs-intake deterministically (not trusting
+   * the LLM's freezeSafe). undefined = a normal correctness/build item. */
+  kind: z.enum(["correctness", "design"]).optional(),
 });
 export type CompletableItem = z.infer<typeof CompletableItemSchema>;
 

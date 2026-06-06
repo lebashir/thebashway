@@ -139,12 +139,21 @@ function drainDepsFor(lb: LoadedBinding, surface: string, baseRef: string, notif
 async function cmdFix(cwd: string, args: string[], configPath?: string): Promise<number> {
   const target = args.find((a) => !a.startsWith("--")) ?? ".";
   const dryRun = args.includes("--dry-run");
+  const designMode = args.includes("--design");
   const land = !args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
   tlsGuard();
 
   const plan = resolveTarget(target);
-  const auditDeps = defaultAuditDeps({ repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, surface: plan.surface });
+  if (designMode) {
+    console.log("fix --design: studying design quality (design findings are advisory → always @needs-intake).");
+  }
+  const auditDeps = defaultAuditDeps({
+    repoRoot: lb.paths.repoRoot,
+    decisionsPath: lb.paths.decisionsPath,
+    surface: plan.surface,
+    auditKind: designMode ? "design" : "correctness",
+  });
   const audit = await runAudit(
     { target, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun },
     auditDeps,

@@ -32,6 +32,11 @@ are kept. Two modes:
 4. **Rails** — any task that reaches a person or destroys data is set aside for human
    approval, never built automatically. This is non-negotiable.
 5. **Learning** — mistakes a gate catches are recorded so they aren't repeated.
+6. **Design quality, built in** — every build carries a design bar, so UI work aims to be
+   genuinely well-designed (extend the project's design system, no generic "AI-slop"), and UI
+   tasks build on the stronger model. `thebashway fix <target> --design` audits a target for
+   design-quality issues (advisory — always set aside for human review). Source-level only; not a
+   visual sign-off.
 
 ## Operating rules for an agent
 

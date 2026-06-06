@@ -22,6 +22,7 @@ import {
 import { enqueueFindings } from "./queue-ops";
 import { buildIntakePromptFromDisk } from "./intake-prompt";
 import { runClaude } from "./headless";
+import { DESIGN_BAR } from "./design-bar";
 import {
   AUDIT_FANOUT_MAX,
   AUDIT_BUILDREADY_MIN_CONFIDENCE,
@@ -123,6 +124,12 @@ export async function runAudit(opts: AuditOptions, deps: AuditDeps): Promise<Aud
     if (item.status === "unclaimed" && v.confidence < buildReadyMin) {
       item = { ...item, status: "needs-intake" };
       downgradedLowConfidence++;
+    }
+    // Deterministic design rail: a design-quality finding is taste — ALWAYS human-gated. Force it
+    // @needs-intake off the SOURCE finding's kind (never trusting the shaper's freezeSafe), and
+    // stamp the provenance. Mirrors how design-run.ts re-adds rails as tested code, not LLM prose.
+    if (v.finding.kind === "design") {
+      item = { ...item, kind: "design", status: "needs-intake" };
     }
     shaped.push(item);
   }
@@ -292,18 +299,37 @@ export function defaultAuditDeps(cfg: {
   repoRoot: string;
   decisionsPath: string;
   surface: string;
+  /** "correctness" (default) hunts logic defects; "design" hunts design-system deviations. */
+  auditKind?: "correctness" | "design";
 }): AuditDeps {
+  const designMode = cfg.auditKind === "design";
+  // NOTE: these audit dispatches build their prompts INLINE (runFinder/runVerify here, runShape via
+  // buildIntakePromptFromDisk) — they never route through buildBashaPrompt, so the standing design
+  // bar is structurally NEVER present in them. The ONLY design-bar injection is the deliberate one
+  // in the design-mode finder below. (This is why no "finder omits the bar" suppression test is
+  // needed: there is no default-on bar to suppress on this code path.)
   return {
     async runFinder(subArea, plan) {
-      const prompt =
-        `You are a READ-ONLY code auditor. Examine ONLY the files under this sub-area ` +
-        `of the ${plan.surface} surface:\n  ${subArea}\n(inside the target area ${plan.rootGlob}).\n` +
-        `Find concrete CORRECTNESS defects only — real bugs, not style or speculation. ` +
-        `For each, set freezeSafe true if the fix is logic/backend/maintenance, false if it would ` +
-        `add NEW organ UI (frozen). Do NOT invent findings: an empty array is the correct answer ` +
-        `for clean code.\nOutput ONLY a JSON array (no prose) of ` +
-        `{"title","description","subArea":"${subArea}","confidence":0-1,"freezeSafe":bool}, ` +
-        `wrapped in a \`\`\`json fenced block.`;
+      const prompt = designMode
+        ? `You are a READ-ONLY design auditor. Study the USER-FACING UI source under this sub-area ` +
+          `of the ${plan.surface} surface:\n  ${subArea}\n(inside the target area ${plan.rootGlob}).\n` +
+          `Judge it against this design bar:\n${DESIGN_BAR}\n\n` +
+          `Find concrete, SOURCE-GROUNDED design-quality defects: deviations from the project's ` +
+          `design system (a hardcoded value where a token exists, off-scale spacing, generic or ` +
+          `default typography, missing hover / empty / loading / error states, weak hierarchy, not ` +
+          `using a primitive that fits) and generic AI-slop patterns. Cite the file + the exact ` +
+          `problem. Do NOT invent findings: an empty array is correct for clean UI. Set ` +
+          `freezeSafe=false (a design change touches UI) and "kind":"design" on EVERY finding.\n` +
+          `Output ONLY a JSON array (no prose) of {"title","description","subArea":"${subArea}",` +
+          `"confidence":0-1,"freezeSafe":false,"kind":"design"}, wrapped in a \`\`\`json fenced block.`
+        : `You are a READ-ONLY code auditor. Examine ONLY the files under this sub-area ` +
+          `of the ${plan.surface} surface:\n  ${subArea}\n(inside the target area ${plan.rootGlob}).\n` +
+          `Find concrete CORRECTNESS defects only — real bugs, not style or speculation. ` +
+          `For each, set freezeSafe true if the fix is logic/backend/maintenance, false if it would ` +
+          `add NEW organ UI (frozen). Do NOT invent findings: an empty array is the correct answer ` +
+          `for clean code.\nOutput ONLY a JSON array (no prose) of ` +
+          `{"title","description","subArea":"${subArea}","confidence":0-1,"freezeSafe":bool}, ` +
+          `wrapped in a \`\`\`json fenced block.`;
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
       if (!res.ok) return [];
       return parseFindings(res.stdout, subArea);
@@ -313,9 +339,18 @@ export function defaultAuditDeps(cfg: {
       const list = findings
         .map((f, i) => `${i}. [${f.subArea}] ${f.title} — ${f.description} (finder confidence ${f.confidence})`)
         .join("\n");
-      const prompt =
-        `You are an ADVERSARIAL verifier. For each candidate defect below, TRY TO REFUTE it. ` +
-        `Default to is_real=false if you are uncertain or cannot confirm it from the code.\n${list}\n\n` +
+      const prompt = designMode
+        ? // Taste reframed as conformance: "refute if uncertain" would nuke every subjective design
+          // finding, so judge defensible deviations from the SYSTEM instead of personal preference.
+          `You are verifying candidate DESIGN-QUALITY findings against a design system. For each, judge: ` +
+          `is this a REAL, DEFENSIBLE deviation from the stated design system, or a genuine design defect ` +
+          `a designer would fix? Confirm defensible, source-grounded deviations (do NOT reflexively refute ` +
+          `taste — judge conformance to the system, not personal preference). Reject only vague, ` +
+          `unfounded, or purely-subjective items.\n${list}\n\n` +
+          `Output ONLY a JSON array aligned by index: ` +
+          `[{"index":n,"is_real":bool,"confidence":0-1,"reason":"..."}], in a \`\`\`json fenced block.`
+        : `You are an ADVERSARIAL verifier. For each candidate defect below, TRY TO REFUTE it. ` +
+          `Default to is_real=false if you are uncertain or cannot confirm it from the code.\n${list}\n\n` +
         `Output ONLY a JSON array aligned by index: ` +
         `[{"index":n,"is_real":bool,"confidence":0-1,"reason":"..."}], in a \`\`\`json fenced block.`;
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });

@@ -24,6 +24,7 @@ import { shouldTrip } from "./breaker";
 import { type DigestRecord, summaryLine } from "./digest";
 import { DRAIN_BREAKER, MAX_CONCURRENT_BASHAS, SURFACES } from "./config";
 import { buildBashaPromptFromDisk } from "./basha-prompt";
+import { isUiTerritory } from "./design-bar";
 import { runClaude, parseMarker } from "./headless";
 import { spawnWorktree } from "./worktree-seed";
 import { assertClean } from "./cleanup";
@@ -421,10 +422,14 @@ export function defaultDrainDeps(cfg: {
         taskBody,
         buildAreas: [cfg.surface],
       });
+      // UI-bearing items get the stronger model (the designing basha): design quality is won by
+      // capability, so don't build UI with the fast model. A file-extension/path heuristic, not a
+      // surface-role gate. Logic work stays on the fast model.
+      const model = isUiTerritory(item.territory) ? "opus" : "sonnet";
       const res = await runClaude({
         prompt,
         cwd: ctx.worktree,
-        model: "sonnet",
+        model,
         skipPermissions: true,
       });
       if (!res.ok) return { ok: false, branch: ctx.branch, reason: res.timedOut ? "basha timed out" : "basha exited non-zero" };
