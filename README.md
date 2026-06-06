@@ -93,6 +93,31 @@ thebashway "the date on the receipt is off by one day"
 
 ---
 
+## Keeping it up to date
+
+You installed thebashway **once** in one place (the `~/thebashway` clone). Every project you
+run it in just points back at that one clone — `thebashway init` only writes a small settings
+file into your project, never a copy of the tool. So to get the latest version, update that one
+clone:
+
+```
+thebashway update
+```
+
+That pulls the newest version (fast-forward only) and reinstalls anything that changed. One
+update reaches **every** project you use thebashway in — and your per-project settings
+(`thebashway.config.ts`) and history (`.thebashway/`) are left exactly as they are. If you
+linked the command with `bun link`, there's nothing to re-link; if you installed the skill via
+`install.sh`, it's a symlink, so it follows along too.
+
+(The long way, if you skipped `bun link`: `cd ~/thebashway && git pull && bun install`.)
+
+If `update` says you have **local uncommitted changes**, you edited something inside the clone —
+commit or stash it first. If it says it **isn't a git checkout**, you installed it some other way;
+re-install from source.
+
+---
+
 ## What it does behind the scenes
 
 1. It works on a **separate branch**, never directly on your main code.

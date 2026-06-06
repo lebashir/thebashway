@@ -24,6 +24,8 @@ import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
 import { runInit, initMessage } from "./init";
 import { checkSync, readSyncRef } from "./check-sync";
+import { runUpdate, type Runner } from "./update";
+import { spawnSync } from "node:child_process";
 import { resolveTarget, effectiveQueueStatus } from "./engine/audit";
 import { drain, defaultDrainDeps, type DrainDeps } from "./engine/drain";
 import { runAudit, defaultAuditDeps } from "./engine/audit-run";
@@ -114,6 +116,20 @@ function cmdCheckSync(): number {
     for (const c of report.commits) console.log(`  ${c}`);
   }
   return 0;
+}
+
+function cmdUpdate(): number {
+  // The package clone's root: this file is src/cli.ts, so ".." is the repo root (same anchor
+  // check-sync uses for .sync-ref). Every project references this one clone — updating here
+  // updates them all; per-project config/state is untouched.
+  const pkgRoot = new URL("..", import.meta.url).pathname;
+  const run: Runner = (cmd, a, cwd) => {
+    const r = spawnSync(cmd, a, { cwd, encoding: "utf8" });
+    return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  };
+  const report = runUpdate({ pkgRoot, run });
+  console.log(report.message);
+  return report.ok ? 0 : 1;
 }
 
 async function cmdAuditPlan(cwd: string, target: string, configPath?: string): Promise<number> {
@@ -233,6 +249,7 @@ function usage(): void {
                                          BUILD: design a new feature, then build it
   thebashway "<request>"                 auto-route to build or fix
   thebashway audit-plan <target>         print the resolved plan (no model calls)
+  thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
   thebashway check-sync                  report drift vs the lifeofbash engine
 
   Common: --config <path>  use a binding other than ./thebashway.config.ts
@@ -254,6 +271,8 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return cmdInit(cwd, args);
     case "check-sync":
       return cmdCheckSync();
+    case "update":
+      return cmdUpdate();
     case "audit-plan":
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
     case "fix":

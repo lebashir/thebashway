@@ -12,6 +12,7 @@ and settings reference.
 | `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. |
 | `thebashway "<request>"` | Auto-route the request to Build or Fix. |
 | `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
+| `thebashway update` | Update the thebashway clone in place: `git pull --ff-only` + `bun install`. Reaches every project that uses it (they share the one clone); per-project config/state is untouched. Refuses on a dirty tree or a non-git install. |
 | `thebashway check-sync` | Report commits to the lifeofbash engine since this package was last reconciled (drift). |
 | `--config <path>` | (Any command) use a binding file other than `./thebashway.config.ts`. |
 
