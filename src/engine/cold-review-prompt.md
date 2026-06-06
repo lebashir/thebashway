@@ -107,6 +107,23 @@ Verdicts:
 Default to inline-fixing in spirit: if you're unsure whether it's
 inline-or-structural, prefer `INLINE-FIX` and let the driver judge.
 
+### DESIGN REVIEW (only when the diff includes user-facing UI)
+
+If the diff touches UI (frontend file extensions, a components/views/styles
+directory), also judge it against the **design bar** — beautiful, not generic:
+
+- Does it extend the project's **design system** (if one exists) rather than
+  invent a clashing look? Uses its primitives/tokens instead of hardcoding;
+  deliberate typography; real hierarchy and spacing on the system's scale;
+  purposeful motion; considered empty / loading / error states.
+- Generic AI-slop (undifferentiated cards, default fonts, timid palettes,
+  missing states, copy-paste shapes) is a finding: `INLINE-FIX` for small
+  polish, `STRUCTURAL` for a wrong aesthetic direction.
+
+This is a **SOURCE/diff-level** check only. You cannot see the rendered pixels,
+so do NOT claim visual sign-off — flag what the source shows and leave true
+visual quality to a human.
+
 ---
 
 ## Operating-lesson capture (basha optional)

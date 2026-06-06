@@ -15,6 +15,7 @@ import { formatForPrompt, relevantLessons, readLessons } from "./lessons";
 import type { Lesson as OrchestratorLesson } from "./lessons";
 import { parseLessons } from "./operating-lessons";
 import type { Lesson as OperatingLesson } from "./operating-lessons";
+import { DESIGN_BAR } from "./design-bar";
 
 // Default area filter for cross-cutting guardrails injected into every basha.
 // Does NOT include people/self/* — those are never injected into build-zone prompts.
@@ -29,6 +30,12 @@ export interface BuildBashaPromptOptions {
   taskBody: string;
   /** Operating areas to inject. Defaults to DEFAULT_OPERATING_AREAS. */
   operatingAreas?: string[];
+  /**
+   * Append the standing design bar (after the task body). Default true — every build basha
+   * carries it; it self-no-ops on backend work via its short-circuit opener. Set false only for
+   * dispatches that never emit UI and want a clean prompt.
+   */
+  designBar?: boolean;
 }
 
 function formatOperatingBlock(lessons: OperatingLesson[], areas: readonly string[]): string {
@@ -45,6 +52,7 @@ export function buildBashaPrompt(opts: BuildBashaPromptOptions): string {
     buildLessons,
     taskBody,
     operatingAreas = DEFAULT_OPERATING_AREAS,
+    designBar = true,
   } = opts;
 
   const parts: string[] = [];
@@ -56,6 +64,9 @@ export function buildBashaPrompt(opts: BuildBashaPromptOptions): string {
   if (buildBlock) parts.push(buildBlock);
 
   if (taskBody) parts.push(taskBody);
+
+  // The design bar rides LAST — read right before acting, and an honest no-op on backend work.
+  if (designBar) parts.push(DESIGN_BAR);
 
   return parts.join("\n\n");
 }
@@ -73,8 +84,9 @@ export async function buildBashaPromptFromDisk(opts: {
   //   null      → no global store (a bare repo); use local build lessons only
   //   string    → read the shared cross-project store at this path
   operatingLessonsPath?: string | null;
+  designBar?: boolean;       // append the design bar (default true)
 }): Promise<string> {
-  const { repoRoot, lessonsPath, taskBody, buildAreas = [], operatingAreas, operatingLessonsPath } = opts;
+  const { repoRoot, lessonsPath, taskBody, buildAreas = [], operatingAreas, operatingLessonsPath, designBar } = opts;
 
   // Read operating lessons (the global store).
   const ledgerPath =
@@ -90,5 +102,5 @@ export async function buildBashaPromptFromDisk(opts: {
   const allBuildLessons = await readLessons(lessonsPath);
   const buildLessons = relevantLessons(allBuildLessons, ["general", ...buildAreas]);
 
-  return buildBashaPrompt({ operatingLessons, buildLessons, taskBody, operatingAreas });
+  return buildBashaPrompt({ operatingLessons, buildLessons, taskBody, operatingAreas, designBar });
 }

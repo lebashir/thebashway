@@ -15,9 +15,11 @@ import {
   auditFingerprint,
   AuditPlanSchema,
   CompletableItemSchema,
+  FindingSchema,
   type AuditPlan,
   type CompletableItem,
 } from "../audit";
+import { runAudit } from "../audit-run";
 import { enqueueFindings } from "../queue-ops";
 import { parseQueue } from "../queue";
 
@@ -283,5 +285,59 @@ describe("enqueueFindings — malformed input zod-rejection", () => {
   test("array of CompletableItems is validatable", () => {
     const arr = [buildReadyItem, needsIntakeItem];
     expect(() => z.array(CompletableItemSchema).parse(arr)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runAudit — deterministic design rail (B)
+// ---------------------------------------------------------------------------
+
+describe("runAudit — design findings are always human-gated", () => {
+  test("a design-kind finding is forced @needs-intake even when the shaper says unclaimed and freezeSafe:true", async () => {
+    // The whole safety claim of the design audit: taste never auto-builds. Prove the rail keys off
+    // the finding KIND, not the LLM's freezeSafe (deliberately mis-set to true here).
+    const designFinding = {
+      title: "Generic card styling",
+      description: "Card uses a default font and a hardcoded color instead of a token",
+      subArea: "organs/src/sections/money/components/**",
+      confidence: 0.95,
+      freezeSafe: true, // LLM mis-set — the rail must NOT trust this
+      kind: "design" as const,
+    };
+    const deps = {
+      // "money" fans out to several sub-areas; emit the finding from just one.
+      runFinder: async (subArea: string) => (subArea.includes("components") ? [designFinding] : []),
+      runVerify: async (fs: { confidence: number }[]) =>
+        fs.map((f) => ({ finding: f as never, isReal: true, confidence: 0.9 })),
+      runShape: async () =>
+        ({
+          title: "Generic card styling",
+          goal: "Replace the hardcoded color + default font with design tokens",
+          territory: ["organs/src/sections/money/components/**"],
+          doneWhen: "Card uses the design system's primitives and tokens",
+          status: "unclaimed" as const, // shaper tries to make it build-ready...
+          freezeSafe: true,
+        }),
+    };
+    const report = await runAudit(
+      { target: "money", queuePath: "/tmp/unused", repoRoot: "/tmp", decisionsPath: "/tmp/d.md", dryRun: true },
+      deps,
+    );
+    expect(report.shaped).toHaveLength(1);
+    const shaped = report.shaped[0]!;
+    expect(shaped.status).toBe("needs-intake"); // ...but the rail forces it down
+    expect(shaped.kind).toBe("design"); // provenance stamped
+  });
+
+  test("FindingSchema accepts kind:'design' and defaults to correctness when omitted", () => {
+    const withKind = FindingSchema.safeParse({
+      title: "t", description: "d", subArea: "s", confidence: 0.9, freezeSafe: false, kind: "design",
+    });
+    expect(withKind.success && withKind.data.kind).toBe("design");
+    const without = FindingSchema.safeParse({
+      title: "t", description: "d", subArea: "s", confidence: 0.9, freezeSafe: true,
+    });
+    expect(without.success).toBe(true);
+    expect(without.success && without.data.kind).toBeUndefined(); // undefined ⇒ correctness
   });
 });
