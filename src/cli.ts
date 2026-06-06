@@ -187,6 +187,7 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   }
   const dryRun = args.includes("--dry-run");
   const noDrain = args.includes("--no-drain");
+  const noLand = args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
   tlsGuard();
 
@@ -209,7 +210,7 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   });
 
   const report = await runFeatureDesign(
-    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun, noDrain },
+    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun, noDrain, noLand },
     deps,
   );
   if (report.aborted) {
