@@ -105,16 +105,57 @@ function onPath(bin: string): boolean {
   return spawnSync("which", [bin], { encoding: "utf8" }).status === 0;
 }
 
+/** The plugin@marketplace id used in a project's `enabledPlugins`. */
+export const PLUGIN_ID = "thebashway@thebashway";
+
+/**
+ * Merge `enabledPlugins["thebashway@thebashway"] = true` into a project's `.claude/settings.json`
+ * CONTENT, preserving every other key. Pure + fail-safe: content we can't parse as a JSON object
+ * is returned UNTOUCHED (status "malformed") so init never clobbers a user's settings. Absent/empty
+ * → a fresh minimal file. Already-enabled → unchanged ("already").
+ */
+export function enablePluginInSettings(
+  raw: string | null,
+  pluginId: string = PLUGIN_ID,
+): { content: string; status: "added" | "already" | "malformed" } {
+  let obj: Record<string, unknown> = {};
+  if (raw != null && raw.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { content: raw, status: "malformed" };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { content: raw, status: "malformed" };
+    }
+    obj = parsed as Record<string, unknown>;
+  }
+  const existing =
+    obj.enabledPlugins && typeof obj.enabledPlugins === "object" && !Array.isArray(obj.enabledPlugins)
+      ? (obj.enabledPlugins as Record<string, unknown>)
+      : {};
+  if (existing[pluginId] === true) return { content: raw ?? "", status: "already" };
+  const next = { ...obj, enabledPlugins: { ...existing, [pluginId]: true } };
+  return { content: JSON.stringify(next, null, 2) + "\n", status: "added" };
+}
+
 export interface InitResult {
   configPath: string;
   created: boolean; // false when a config already existed (idempotent skip)
   detect: ProjectDetection;
   prereqs: { claude: boolean; git: boolean; cleanTree: boolean };
+  /** Where the plugin-enable write went (project-scope settings). */
+  settingsPath: string;
+  /** What init did about enabling the plugin for THIS repo (per-project activation):
+   *  added = wrote enabledPlugins; already = was on; skipped = --no-enable-plugin;
+   *  malformed = settings.json unparseable, left untouched. */
+  pluginEnabled: "added" | "already" | "skipped" | "malformed";
 }
 
 export async function runInit(
   dir: string,
-  opts?: { globalLessons?: string | null },
+  opts?: { globalLessons?: string | null; enablePlugin?: boolean },
 ): Promise<InitResult> {
   const detect = await detectProject(dir);
 
@@ -132,6 +173,21 @@ export async function runInit(
   const decisions = join(storeDir, "decisions.md");
   if (!existsSync(decisions)) writeFileSync(decisions, DECISIONS_SEED, "utf8");
 
+  // Per-project plugin activation (default on): turn the method ON for THIS repo only, by merging
+  // enabledPlugins into its project-scope .claude/settings.json. Merge-safe; --no-enable-plugin
+  // skips it (e.g. for users who installed the method via install.sh, not the marketplace plugin).
+  const settingsPath = join(dir, ".claude", "settings.json");
+  let pluginEnabled: InitResult["pluginEnabled"] = "skipped";
+  if (opts?.enablePlugin ?? true) {
+    const raw = existsSync(settingsPath) ? readFileSync(settingsPath, "utf8") : null;
+    const merged = enablePluginInSettings(raw);
+    pluginEnabled = merged.status;
+    if (merged.status === "added") {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(settingsPath, merged.content, "utf8");
+    }
+  }
+
   const git =
     existsSync(join(dir, ".git")) ||
     spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: dir }).status === 0;
@@ -139,7 +195,14 @@ export async function runInit(
     git &&
     spawnSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" }).stdout.trim() === "";
 
-  return { configPath, created, detect, prereqs: { claude: onPath("claude"), git, cleanTree } };
+  return {
+    configPath,
+    created,
+    detect,
+    prereqs: { claude: onPath("claude"), git, cleanTree },
+    settingsPath,
+    pluginEnabled,
+  };
 }
 
 /** A short, friendly post-init message (or what's missing). */
@@ -147,6 +210,8 @@ export function initMessage(r: InitResult): string {
   const lines: string[] = [];
   lines.push(r.created ? `Wrote ${r.configPath}` : `Kept your existing ${r.configPath}`);
   lines.push(`Detected: ${r.detect.runner}${r.detect.isNext ? " + Next.js" : ""}, chain = [${r.detect.chain.map((c) => c.name).join(", ") || "none — edit the config"}]`);
+  if (r.pluginEnabled === "added") lines.push(`Enabled the thebashway plugin for this repo (${r.settingsPath}).`);
+  else if (r.pluginEnabled === "malformed") lines.push(`! Couldn't parse ${r.settingsPath} — left it untouched. Enable manually: set enabledPlugins["${PLUGIN_ID}"] = true.`);
   if (!r.prereqs.claude) lines.push(`! The \`claude\` command is not on your PATH — install it before running build/fix.`);
   if (!r.prereqs.git) lines.push(`! This folder is not a git repo — run \`git init\` first.`);
   if (r.prereqs.claude && r.prereqs.git) {

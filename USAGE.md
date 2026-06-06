@@ -7,7 +7,7 @@ and settings reference.
 
 | Command | What it does |
 |---|---|
-| `thebashway init [--global <path>]` | Detect how the repo builds, write `thebashway.config.ts` + a `.thebashway/` store. `--global` points the shared lessons file at a cross-project store. |
+| `thebashway init [--global <path>] [--no-enable-plugin]` | Detect how the repo builds, write `thebashway.config.ts` + a `.thebashway/` store, and **enable the plugin for this repo** (merges `enabledPlugins` into `.claude/settings.json`, preserving the rest). `--global` points the shared lessons file at a cross-project store. `--no-enable-plugin` skips the enable (e.g. if you installed the method via `install.sh`). |
 | `thebashway fix <target> [--dry-run] [--no-land]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging + deploying. |
 | `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. |
 | `thebashway "<request>"` | Auto-route the request to Build or Fix. |
