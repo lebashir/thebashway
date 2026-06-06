@@ -1,0 +1,7 @@
+# Gitignored files the worktree spawner copies into every fresh worktree so
+# verify (build/smoke) doesn't fail with "SUPABASE_URL not set" or similar.
+# These files stay gitignored — never committed. Just copied at spawn time.
+#
+# One path per line, relative to repo root. `#` for comments; blanks ignored.
+
+organs/.env.local
