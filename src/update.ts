@@ -2,7 +2,9 @@
 // `thebashway update` core: pull the latest engine into the package clone (git, fast-forward
 // only) and reinstall deps if anything changed. Every project that uses thebashway references
 // this one clone, so a single update reaches them all; per-project `thebashway.config.ts` +
-// `.thebashway/` stores are untouched. The skill is a symlink into `skill/`, so it auto-follows.
+// `.thebashway/` stores are untouched. (A source-installed skill is a symlink into
+// `plugins/thebashway/skill/`, so it auto-follows; plugin-marketplace installs update via
+// `claude plugin update thebashway` instead.)
 //
 // Side effects (git/bun) go through an INJECTED `run` seam so the decision logic is unit-tested
 // without touching the network or the filesystem (mirrors check-sync.ts's injected gitLog).

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "thebashway",
+  "description": "thebashway — autonomous Build + Fix for any repo, behind evidence-backed gates.",
+  "owner": {
+    "name": "Bashir Abi Habib"
+  },
+  "plugins": [
+    {
+      "name": "thebashway",
+      "source": "./plugins/thebashway",
+      "description": "Autonomous Build + Fix for any repo — Claude builds/fixes code behind evidence-backed gates with human-approval rails. NOTE: this delivers the METHOD (skill + slash commands); the Bun engine installs separately (one clone + `bun install`) — see the repo README.",
+      "category": "development",
+      "author": {
+        "name": "Bashir Abi Habib"
+      },
+      "homepage": "https://github.com/lebashir/thebashway",
+      "keywords": ["build", "fix", "automation", "orchestration", "agents", "ci"]
+    }
+  ]
+}
