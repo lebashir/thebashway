@@ -78,6 +78,36 @@ build/test commands look right.** If they don't, open `thebashway.config.ts` and
 
 ---
 
+## Turn it on only where you use it
+
+Installing the plugin makes it **available** everywhere, but it does **not** force itself into
+every repo. Two separate things make thebashway active in a project, and you control both per
+project:
+
+1. **`thebashway init`** — sets up the *engine* for that repo (writes `thebashway.config.ts`). Only
+   the repos you init can be built/fixed.
+2. **Enabling the plugin in that repo** — turns on the *method* (the skill + slash commands) for
+   that repo's Claude sessions.
+
+So you can install once and keep it **off by default**, switching it on only where you've init'd:
+
+```
+# once, globally available but not auto-on:
+claude plugin install thebashway@thebashway
+claude plugin disable thebashway          # off everywhere by default
+
+# in each repo where you use thebashway:
+thebashway init
+claude plugin enable thebashway --scope project
+```
+
+`--scope project` records the choice in that repo's `.claude/settings.json`
+(`"enabledPlugins": { "thebashway@thebashway": true }`) — committable, so teammates who clone it
+get prompted to enable it too. Repos you never touch never load the skill (no extra tokens, no
+noise).
+
+---
+
 ## Use it
 
 Two things you can type. Run them from inside your project.

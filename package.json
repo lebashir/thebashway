@@ -1,9 +1,10 @@
 {
   "name": "thebashway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Portable autonomous build loop: Build Mode + Fix Mode for any code repo, driven by Claude with evidence-backed gates.",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./binding": "./src/binding.ts"

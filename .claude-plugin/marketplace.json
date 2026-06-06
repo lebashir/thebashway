@@ -15,6 +15,7 @@
         "name": "Bashir Abi Habib"
       },
       "homepage": "https://github.com/lebashir/thebashway",
+      "license": "MIT",
       "keywords": ["build", "fix", "automation", "orchestration", "agents", "ci"]
     }
   ]
