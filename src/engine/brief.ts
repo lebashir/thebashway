@@ -52,7 +52,8 @@ export const DesignBriefSchema = z
     confirmed: z.boolean().default(false), // INV: load-bearing — see spec 4.2
     narrative: z.string().default(""), // the human-readable prose (long form)
     purpose: z.string(),
-    whyNow: z.string(),
+    whyNow: z.string().default(""), // OPTIONAL narrative — the interview never asks it (not a Ring-1
+    // core field), so a `brief write` payload may omit it; never gated by the confirm guard.
     whoServed: z.string(),
     scope: z.string(),
     limits: z.string(),

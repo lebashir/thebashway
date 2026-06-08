@@ -158,8 +158,10 @@ const EMPTY_REPO_GAPS = [
   COMMAND_PLACEHOLDER_GAP,
 ];
 
-/** Serialize a brief draft to a `brief.ts` module that `export default`s a zod-loadable object (INV-B). */
-export function briefModule(fields: BriefDraftFields): string {
+/** Serialize a SEED brief draft to a `brief.ts` module (INV-B). Internal to init: a fresh draft has
+ * empty scope arrays/milestones by definition. The CONFIRMED write uses brief-writer's
+ * renderBriefModule, which serializes the full brief verbatim (it must not drop owner-declared scope). */
+function briefModule(fields: BriefDraftFields): string {
   const obj = {
     confirmed: fields.confirmed,
     narrative: fields.narrative,

@@ -26,6 +26,36 @@ test("writeConfirmedBrief writes a file that round-trips through loadBrief to st
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("writeConfirmedBrief round-trips the STRUCTURED drift fields + milestones VERBATIM (classifyDrift teeth)", async () => {
+  // The drift guardrails read exactly inScopeSurfaces/forbiddenSurfaces/forbiddenTerritory, and the
+  // 'defer-the-rest' path stores milestones — so the writer must NOT drop any of them (it must not
+  // route through init's seed-shaped briefModule, which hardcodes these empty).
+  const dir = mkdtempSync(join(tmpdir(), "bw-"));
+  const path = join(dir, "brief.ts");
+  writeConfirmedBrief(
+    full({
+      inScopeSurfaces: ["app"],
+      forbiddenSurfaces: ["billing"],
+      forbiddenTerritory: ["src/legacy/**"],
+      timeHorizon: "Q3",
+      target: "v1",
+      openExplorations: ["mobile?"],
+      milestones: [{ statement: "UX feels fast", humanJudged: true }],
+    }),
+    path,
+  );
+  const loaded = await loadBrief(path);
+  expect(loaded.status).toBe("ok");
+  expect(loaded.brief?.inScopeSurfaces).toEqual(["app"]);
+  expect(loaded.brief?.forbiddenSurfaces).toEqual(["billing"]);
+  expect(loaded.brief?.forbiddenTerritory).toEqual(["src/legacy/**"]);
+  expect(loaded.brief?.timeHorizon).toBe("Q3");
+  expect(loaded.brief?.target).toBe("v1");
+  expect(loaded.brief?.openExplorations).toEqual(["mobile?"]);
+  expect(loaded.brief?.milestones).toEqual([{ statement: "UX feels fast", humanJudged: true }]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("writeConfirmedBrief recomputes gaps via gapsOf (ignores caller's stale gaps)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bw-"));
   const path = join(dir, "brief.ts");
@@ -42,6 +72,17 @@ test("renderBriefModule is pure (same input → same output)", () => {
 });
 
 import { parseBriefWritePayload } from "../brief-writer";
+
+test("parseBriefWritePayload accepts a confirmed payload that OMITS whyNow (optional, never gated)", () => {
+  // The interview never asks 'why now', so the agent-assembled payload may omit it; whyNow defaults
+  // to "" and the confirm guard (Ring-1 core only) does not block.
+  const r = parseBriefWritePayload(JSON.stringify({
+    confirmed: true, purpose: "p", whoServed: "w", scope: "s", limits: "l",
+    successCriteria: [{ id: "c", statement: "s", check: { kind: "command", run: "bun test" }, required: true }],
+  }));
+  expect(r.ok).toBe(true);
+  if (r.ok) expect(r.brief.whyNow).toBe("");
+});
 
 test("parseBriefWritePayload rejects malformed JSON", () => {
   const r = parseBriefWritePayload("{ not json");

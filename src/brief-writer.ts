@@ -4,13 +4,23 @@
 // no writer; this is the only non-init writeFileSync(briefPath) in the codebase.
 import { writeFileSync } from "node:fs";
 import { gapsOf, DesignBriefSchema, type DesignBrief, type BriefReadiness } from "./engine/brief";
-import { briefModule } from "./init";
 
-/** Pure render of a confirmed DesignBrief to a clean, re-readable brief.ts module. */
+/** Pure render of a DesignBrief to a clean, re-readable `brief.ts` module.
+ *
+ * Serializes the FULL brief VERBATIM (every field). It deliberately does NOT route through
+ * init.ts's `briefModule`: that renderer is SEED-shaped — it hardcodes inScopeSurfaces/
+ * forbiddenSurfaces/forbiddenTerritory/milestones to empty and omits timeHorizon/target/
+ * openExplorations — which is correct for a fresh draft but would SILENTLY DROP the scope fields
+ * the interview gathered (and those exact fields are classifyDrift's drift teeth). The writer must
+ * preserve everything the owner declared, so it serializes the whole zod-validated object. */
 export function renderBriefModule(brief: DesignBrief): string {
   // gaps are recomputed canonically (never trust a caller's stale list).
-  const fields = { ...brief, gaps: gapsOf(brief).gaps };
-  return briefModule(fields);
+  const obj = { ...brief, gaps: gapsOf(brief).gaps };
+  return `// .thebashway/brief.ts — the per-project DESIGN BRIEF (north star).
+// Written by \`thebashway brief write\` from the agent interview. A TS module that
+// \`export default\`s a zod-validated object — edit freely, keep it loadable.
+export default ${JSON.stringify(obj, null, 2)};
+`;
 }
 
 /** The human-present write. Renders + writes; recomputes gaps via gapsOf. */
