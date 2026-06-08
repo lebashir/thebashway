@@ -16,9 +16,11 @@
 //   check-sync               report drift vs the lifeofbash engine
 
 import { resolve, join, isAbsolute } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { setBinding } from "./engine/config";
+import { setBinding, getRequireBrief } from "./engine/config";
+import { gapsOf } from "./engine/brief";
+import { writeConfirmedBrief, parseBriefWritePayload, briefGateDecision, briefStatusLines } from "./brief-writer";
 import { noopSinks, type Notify } from "./sinks";
 import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
@@ -164,19 +166,53 @@ async function cmdBrief(cwd: string, _args: string[], configPath?: string): Prom
     console.log(`Brief: ${briefPath}`);
   }
   const loaded = await loadBrief(briefPath);
-  // Prefer the gaps the seed just recorded; otherwise the gaps the loaded brief carries.
-  const gaps = seeded.created ? seeded.gaps : loaded.brief?.gaps ?? [];
   if (loaded.status === "unparseable") {
     console.log(`! Brief exists but does not parse (${loaded.errors.join("; ")}). Fix it before the interview.`);
+    return 1;
   }
-  if (gaps.length) {
-    console.log(`\nGaps to confirm (${gaps.length}) — have the agent walk you through these:`);
-    for (const g of gaps) console.log(`  - ${g}`);
-  } else if (loaded.status === "ok") {
-    console.log("\nNo open gaps recorded.");
-  }
-  console.log("\nNext: ask the agent to run the brief interview (it maps your plain answers to the schema).");
+  const readiness = loaded.brief ? gapsOf(loaded.brief) : { gaps: seeded.gaps, coreComplete: false, autonomousReady: false, confirmed: false };
+  for (const line of briefStatusLines(readiness)) console.log(line);
   return 0;
+}
+
+/** `thebashway brief write --from <file>`: validate a JSON payload at the boundary and write the
+ * brief. The agent-facing writer behind the conversational interview (it never hand-edits brief.ts). */
+async function cmdBriefWrite(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const fromIdx = args.indexOf("--from");
+  const file = fromIdx >= 0 ? args[fromIdx + 1] : args.find((a) => !a.startsWith("--"));
+  if (!file) {
+    console.error("brief write: pass the payload with --from <file>");
+    return 2;
+  }
+  const lb = await loadBinding({ cwd, configPath });
+  const raw = readFileSync(resolve(cwd, file), "utf8");
+  const parsed = parseBriefWritePayload(raw);
+  if (!parsed.ok) {
+    console.error(`brief write rejected (nothing written):\n  - ${parsed.errors.join("\n  - ")}`);
+    return 1;
+  }
+  writeConfirmedBrief(parsed.brief, lb.paths.briefPath);
+  const r = gapsOf(parsed.brief);
+  console.log(
+    `Wrote ${lb.paths.briefPath} — ${r.confirmed ? "confirmed" : "draft"}` +
+      `${r.gaps.length ? `, remaining: ${r.gaps.join(", ")}` : ", no gaps"}` +
+      `${r.autonomousReady ? "" : " (success check not set — autonomous-to-goal stays off until it is)"}`,
+  );
+  return 0;
+}
+
+/** Brief-first gate: load the brief and decide whether a work command may run. */
+async function briefGate(lb: LoadedBinding, args: string[]): Promise<{ pass: boolean; message?: string }> {
+  const skipBrief = args.includes("--skip-brief");
+  const loaded = await loadBrief(lb.paths.briefPath);
+  const readiness = loaded.status === "ok" && loaded.brief ? gapsOf(loaded.brief) : undefined;
+  return briefGateDecision({
+    status: loaded.status,
+    confirmed: loaded.brief?.confirmed ?? false,
+    readiness,
+    requireBrief: getRequireBrief(),
+    skipBrief,
+  });
 }
 
 /** Build the DrainDeps for a surface from the loaded binding. */
@@ -199,6 +235,8 @@ async function cmdFix(cwd: string, args: string[], configPath?: string): Promise
   const designMode = args.includes("--design");
   const land = !args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const plan = resolveTarget(target);
@@ -248,6 +286,8 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   const noDrain = args.includes("--no-drain");
   const noLand = args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const baseRef = await gitHead(lb.paths.repoRoot);
@@ -355,6 +395,8 @@ async function runMilestoneReflection(
  */
 async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): Promise<number> {
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const tIdx = args.indexOf("--target");
@@ -520,7 +562,7 @@ export async function main(argv: string[], cwd: string): Promise<number> {
     case "audit-plan":
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
     case "brief":
-      return cmdBrief(cwd, args, configPath);
+      return args[0] === "write" ? cmdBriefWrite(cwd, args.slice(1), configPath) : cmdBrief(cwd, args, configPath);
     case "run-to-goal":
       return cmdRunToGoal(cwd, args, configPath);
     case "reflect":

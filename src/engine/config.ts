@@ -250,6 +250,7 @@ let _defaultSurface = "tools";
 let _repoRoot = resolve(import.meta.dir, "..", "..");
 let _briefPath = ".thebashway/brief.ts";
 let _briefSensitivity: "off" | "low" | "medium" | "high" = "medium";
+let _requireBrief = true;
 
 /** The binding's defaultSurface — where ambiguous work and unknown paths land. */
 export function getDefaultSurface(): string {
@@ -271,6 +272,11 @@ export function getBriefSensitivity(): "off" | "low" | "medium" | "high" {
   return _briefSensitivity;
 }
 
+/** Whether work commands require a confirmed brief (binding.rails.requireBrief). Default true. */
+export function getRequireBrief(): boolean {
+  return _requireBrief;
+}
+
 /** Override the project-specific binding values in place. Called once by the CLI at startup. */
 export function setBinding(b: ResolvedBinding): void {
   _defaultSurface = b.defaultSurface;
@@ -278,6 +284,7 @@ export function setBinding(b: ResolvedBinding): void {
   // belt-and-suspenders coalescing so a raw binding injected directly in a test still behaves.
   _briefPath = b.learning.brief ?? ".thebashway/brief.ts";
   _briefSensitivity = b.rails.briefDriftSensitivity ?? "medium";
+  _requireBrief = b.rails.requireBrief ?? true;
   _replaceRecord(SURFACES, b.surfaces as unknown as Record<string, SurfaceConfig>);
   _replaceRecord(AUDIT_TARGETS, (b.auditTargets ?? {}) as typeof AUDIT_TARGETS);
   Object.assign(SWEEP, b.sweep ?? _DEFAULTS.sweep);
@@ -291,6 +298,7 @@ export function resetBinding(): void {
   _repoRoot = resolve(import.meta.dir, "..", "..");
   _briefPath = ".thebashway/brief.ts";
   _briefSensitivity = "medium";
+  _requireBrief = true;
   _replaceRecord(SURFACES, _DEFAULTS.surfaces);
   _replaceRecord(AUDIT_TARGETS, _DEFAULTS.auditTargets);
   Object.assign(SWEEP, _DEFAULTS.sweep);

@@ -140,7 +140,7 @@ It plans the feature, builds it on a branch, runs your tests, and shows you the 
 thebashway "the date on the receipt is off by one day"
 ```
 
-**Give your project a north star** (optional, but it makes everything above sharper):
+**Give your project a north star** — the first thing you do in a new repo:
 
 ```
 thebashway brief
@@ -148,12 +148,17 @@ thebashway brief
 
 This drafts a short, plain-language statement of what your project *is* — its purpose, who
 it's for, what's in and out of scope, and how you'd know it's working — inferred from your
-repo, then confirmed in a quick back-and-forth with the agent (it maps your plain answers to
-the structure; you never write a config). Once it's there, every `fix` / `build` / `audit`
-reads it as guiding context, so the work bends toward what the project is actually for, and it
-*warns* — never blocks — when a design drifts outside the scope you declared. You only ever
-write the brief yourself; thebashway proposes changes for your review and never rewrites your
-vision to fit a request.
+repo, then confirmed in a quick back-and-forth with the agent (it asks plain questions, maps
+your answers to the structure, and writes it for you — you never edit a config). You can pause
+and pick up anytime: it saves progress and, on resume, asks only what's left.
+
+**It comes first by design.** `build` / `fix` / `run-to-goal` won't run until your north star is
+confirmed — they pause and walk you through setting it up — so the engine always knows what it's
+building toward. (Just want a quick one-off, or running unattended? Pass `--skip-brief`, or set
+`requireBrief: false` in your config.) Once it's there, every `fix` / `build` / `audit` reads it
+as guiding context, so the work bends toward what the project is actually for, and it *warns* —
+never blocks — when a design drifts outside the scope you declared. You only ever write the brief
+yourself; thebashway proposes changes for your review and never rewrites your vision to fit a request.
 
 With a north star in place, you can point thebashway at a goal and let it run:
 

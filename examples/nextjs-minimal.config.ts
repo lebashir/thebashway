@@ -26,6 +26,7 @@ export const binding = defineThebashway({
   rails: {
     territoryGlobs: ["src/server/email/**"],
     keywords: /\b(?:send|email|delete|deploy)\b/i,
+    requireBrief: false,
   },
   learning: { global: null, local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md", brief: ".thebashway/brief.ts" },
 });

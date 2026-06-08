@@ -85,6 +85,10 @@ export interface RailsBinding {
   /** How aggressively classifyDrift flags a designed feature that contradicts the brief's
    *  core scope. 'off' = kill switch. Default 'medium'. Resolved in the defineThebashway spread. */
   briefDriftSensitivity?: "off" | "low" | "medium" | "high";
+  /** When true (default), the work commands (build/fix/run-to-goal) require a CONFIRMED brief
+   * before they run; otherwise they guide the owner into the interview. Set false for
+   * headless/scheduled runs or a repo that opts out. Per-run override: --skip-brief. */
+  requireBrief?: boolean;
 }
 
 /** Hybrid learning stores. global is shared/cross-project (read); local is this repo's (read+write). */
@@ -155,6 +159,10 @@ export function defineThebashway(b: ProjectBinding): ResolvedBinding {
     // Resolve the brief defaults AFTER ...b so they win, in this single resolution site
     // (never the :140 throw guard). Optional-with-default preserves back-compat.
     learning: { ...b.learning, brief: b.learning.brief ?? ".thebashway/brief.ts" },
-    rails: { ...b.rails, briefDriftSensitivity: b.rails.briefDriftSensitivity ?? "medium" },
+    rails: {
+      ...b.rails,
+      briefDriftSensitivity: b.rails.briefDriftSensitivity ?? "medium",
+      requireBrief: b.rails.requireBrief ?? true,
+    },
   };
 }

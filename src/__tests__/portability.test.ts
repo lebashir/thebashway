@@ -11,8 +11,10 @@ import {
   getRepoRoot,
   getBriefPath,
   getBriefSensitivity,
+  getRequireBrief,
 } from "../engine/config";
 import { resolveTarget } from "../engine/audit";
+import { defineThebashway } from "../binding";
 import { binding as nextjs } from "../../examples/nextjs-minimal.config";
 import { binding as lifeofbash } from "../../examples/lifeofbash.config";
 
@@ -79,4 +81,27 @@ test("resetBinding restores the brief accessors — no cross-contamination after
   resetBinding();
   expect(getBriefPath()).toBe(".thebashway/brief.ts");
   expect(getBriefSensitivity()).toBe("medium");
+});
+
+test("getRequireBrief reflects a requireBrief:false binding, then resetBinding restores the default true", () => {
+  const optOut = defineThebashway({
+    repoRoot: "/tmp/opt-out",
+    defaultSurface: "app",
+    surfaces: { app: { dir: ".", role: "default home", chain: [{ name: "test", cmd: ["bun", "test"] }] } },
+    rails: { territoryGlobs: [], keywords: /a^/, requireBrief: false },
+    learning: { global: null, local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md" },
+  });
+  setBinding(optOut);
+  expect(getRequireBrief()).toBe(false);
+  resetBinding();
+  expect(getRequireBrief()).toBe(true);
+});
+
+test("nextjs-minimal example opts out of the brief gate", () => {
+  // the example exports the binding as a named `binding` (not default).
+  expect(nextjs.rails.requireBrief).toBe(false);
+});
+
+test("lifeofbash example opts out of the brief gate", () => {
+  expect(lifeofbash.rails.requireBrief).toBe(false);
 });

@@ -8,11 +8,12 @@ and settings reference.
 | Command | What it does |
 |---|---|
 | `thebashway init [--global <path>] [--no-enable-plugin]` | Detect how the repo builds, write `thebashway.config.ts` + a `.thebashway/` store, and **enable the plugin for this repo** (merges `enabledPlugins` into `.claude/settings.json`, preserving the rest). `--global` points the shared lessons file at a cross-project store. `--no-enable-plugin` skips the enable (e.g. if you installed the method via `install.sh`). |
-| `thebashway fix <target> [--dry-run] [--no-land]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging + deploying. |
-| `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. |
-| `thebashway "<request>"` | Auto-route the request to Build or Fix. |
-| `thebashway brief` | **North star.** (Re)draft the per-project design brief from repo signals if missing, then print its path + the gaps to confirm. The brief is the project's living definition: purpose, who it serves, in/out-of-scope surfaces, conventions/glossary, and machine-checkable success criteria. It guides every build/fix/audit and is the goal-set `run-to-goal` drives toward. Non-interactive — the conversational interview that fills the gaps runs in the agent (the plugin skill). The brief is written only by you (or the interview), never silently by the engine. |
-| `thebashway run-to-goal [--target <id,…>]` | **Autonomous to a goal.** Loop build→check→repeat until the brief's success criteria are met, then stop. `--target` aims at a *slice* of the criteria (PART); omitted drives **all required** criteria (ALL). Bounded by required caps (`maxIterations` default 5, a wall-clock backstop, and a build-spend ceiling) + a no-progress stall stop. Refuses to terminate on an **unconfirmed** brief; reports `goal-fully-met` only for the whole star vs `target-slice-met` for a slice; any open **milestone** parks for you instead of declaring done. |
+| `thebashway fix <target> [--dry-run] [--no-land] [--skip-brief]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging + deploying. **Requires a confirmed north-star brief** (the brief-first gate) unless `--skip-brief` or `requireBrief:false`. |
+| `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land] [--skip-brief]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. **Requires a confirmed brief** unless `--skip-brief` / `requireBrief:false`. |
+| `thebashway "<request>"` | Auto-route the request to Build or Fix (inherits the brief-first gate). |
+| `thebashway brief` | **North star — status + draft.** (Re)draft the per-project design brief from repo signals if missing, then print its readiness in plain language: confirmed or draft, the gaps still to fill, whether it's autonomous-ready, and the next step. The brief is the project's living definition: purpose, who it serves, in/out-of-scope surfaces, conventions/glossary, and machine-checkable success criteria. It guides every build/fix/audit and is the goal-set `run-to-goal` drives toward. The conversational interview that fills the gaps runs in the agent (the plugin skill); the brief is written only by you (or the interview), never silently by the engine. |
+| `thebashway brief write --from <file>` | **The interview's writer (agent-facing).** Validate a JSON brief payload at the boundary (zod) and write `brief.ts` — partial save (`confirmed:false`) or final (`confirmed:true`). Refuses a malformed payload or a premature confirm (a Ring-1 core field still empty). This is how the agent persists the interview without hand-editing TypeScript; you rarely type it yourself. |
+| `thebashway run-to-goal [--target <id,…>] [--skip-brief]` | **Autonomous to a goal.** Loop build→check→repeat until the brief's success criteria are met, then stop. `--target` aims at a *slice* of the criteria (PART); omitted drives **all required** criteria (ALL). Bounded by required caps (`maxIterations` default 5, a wall-clock backstop, and a build-spend ceiling) + a no-progress stall stop. Refuses to terminate on an **unconfirmed** brief; reports `goal-fully-met` only for the whole star vs `target-slice-met` for a slice; any open **milestone** parks for you instead of declaring done. |
 | `thebashway reflect [--milestone <label>] [--epic] [--learned <note>] [--propose <delta>]` | **Milestone reflection (Loop C).** Log a reflection to the run log and — only on an explicit `--milestone`/`--epic` marker — stage a single, batched, rate-limited **brief-update proposal** through the human-gate (`queue.md @parked` + `NOW.md ## Parked`). It never writes the brief; you review and apply. |
 | `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
 | `thebashway update` | Update the thebashway clone in place: `git pull --ff-only` + `bun install`. Reaches every project that uses it (they share the one clone); per-project config/state is untouched. Refuses on a dirty tree or a non-git install. |
@@ -63,10 +64,14 @@ export default defineThebashway({
     brief: ".thebashway/brief.ts",       // the north star (optional; this is the default)
   },
 
-  // Optional: how sensitive the design-door drift warning is to a feature that lands outside
-  // the brief's declared core scope. 'off' | 'low' | 'medium' (default) | 'high'. Advisory only —
-  // it never blocks a build, only surfaces a note. Lives on `rails`.
-  // rails: { ..., briefDriftSensitivity: "medium" },
+  // Optional brief knobs, both on `rails`:
+  //   briefDriftSensitivity: how sensitive the design-door drift WARNING is to a feature outside the
+  //     brief's declared core scope. 'off' | 'low' | 'medium' (default) | 'high'. Advisory only — it
+  //     never blocks a build, only surfaces a note.
+  //   requireBrief: the brief-FIRST GATE. true (default) → build/fix/run-to-goal won't run until a
+  //     confirmed brief exists (they guide you into the interview instead). false → opt out (set this
+  //     for headless/scheduled repos, or pass --skip-brief per run).
+  // rails: { ..., briefDriftSensitivity: "medium", requireBrief: true },
 
   sinks: { /* notify, eventSink, statusFile — all optional, default no-ops */ },
   breaker: { maxFailures: 2, window: 3 },

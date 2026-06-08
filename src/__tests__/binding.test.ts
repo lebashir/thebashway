@@ -66,3 +66,15 @@ test("defineThebashway preserves an explicit brief + briefDriftSensitivity (defa
   expect(b.learning.local).toBe(".thebashway/lessons.md");
   expect(b.rails.keywords).toBeInstanceOf(RegExp);
 });
+
+// --- north-star: requireBrief default true (resolved in the spread, NOT the :140 guard) ---
+
+test("defineThebashway defaults requireBrief to true without the learning guard throwing", () => {
+  const r = defineThebashway(minimal); // the existing minimal fixture
+  expect(r.rails.requireBrief).toBe(true);
+});
+
+test("requireBrief:false is preserved", () => {
+  const r = defineThebashway({ ...minimal, rails: { territoryGlobs: [], keywords: /x/, requireBrief: false } });
+  expect(r.rails.requireBrief).toBe(false);
+});

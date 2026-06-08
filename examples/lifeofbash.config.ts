@@ -105,6 +105,7 @@ export const binding = defineThebashway({
 
   rails: {
     territoryGlobs: ["tools/google/**", "tools/jobs/**"],
+    requireBrief: false,
     keywords:
       /\b(?:send|sends|sending|sent|email|e-mail|emails|emailed|mail|message|messages|messaged|messaging|dm|dms|ping|pings|text|texts|texting|notify|notifies|notified|notifying|notification|nudge|nudges|nudging|remind|reminds|reminder|reminders|reach out|reaches out|sms|whatsapp|telegram|slack|broadcast|broadcasts|blast|blasts|alert|alerts|publish|published|tweet|tweets|post to|posts to|delete|deletes|deleting|deleted|drop|drops|dropping|dropped|truncate|truncates|truncated|destroy|destroys|destroying|destroyed|cancel|cancels|cancelling|canceling|cancelled|purge|purges|purged|wipe|wipes|wiped|erase|erases|erased|flush|flushes|remove all|removes all|removed all|clear all|reset the (?:db|database|table)|rm -rf)\b/i,
   },
