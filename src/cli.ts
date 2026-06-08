@@ -22,7 +22,8 @@ import { setBinding } from "./engine/config";
 import { noopSinks, type Notify } from "./sinks";
 import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
-import { runInit, initMessage } from "./init";
+import { runInit, initMessage, seedBriefIfAbsent } from "./init";
+import { loadBrief } from "./engine/load-brief";
 import { checkSync, readSyncRef } from "./check-sync";
 import { runUpdate, type Runner } from "./update";
 import { spawnSync } from "node:child_process";
@@ -42,6 +43,7 @@ export interface DerivedPaths {
   runLogPath: string;
   lessonsPath: string;
   decisionsPath: string;
+  briefPath: string;
   globalLessons: string | null;
 }
 
@@ -54,6 +56,7 @@ export function derivePaths(binding: ProjectBinding): DerivedPaths {
     runLogPath: join(root, ".thebashway", "run-log.md"),
     lessonsPath: rel(binding.learning.local),
     decisionsPath: rel(binding.learning.decisions),
+    briefPath: rel(binding.learning.brief ?? ".thebashway/brief.ts"),
     globalLessons: binding.learning.global ?? null,
   };
 }
@@ -136,6 +139,37 @@ function cmdUpdate(): number {
 async function cmdAuditPlan(cwd: string, target: string, configPath?: string): Promise<number> {
   await loadBinding({ cwd, configPath });
   console.log(JSON.stringify(resolveTarget(target), null, 2));
+  return 0;
+}
+
+/**
+ * BRIEF: the non-interactive companion to the conversational interview (which lives in SKILL.md,
+ * not here — every CLI command is cmd(cwd,args):Promise<number> with no stdin/readline). It
+ * (re)seeds the draft if missing and prints the draft path + the gap list the agent should walk
+ * through. It never silently auto-authors a confirmed brief.
+ */
+async function cmdBrief(cwd: string, _args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const briefPath = lb.paths.briefPath;
+  const seeded = seedBriefIfAbsent(lb.paths.repoRoot, briefPath);
+  if (seeded.created) {
+    console.log(`Drafted ${briefPath} from the repo.`);
+  } else {
+    console.log(`Brief: ${briefPath}`);
+  }
+  const loaded = await loadBrief(briefPath);
+  // Prefer the gaps the seed just recorded; otherwise the gaps the loaded brief carries.
+  const gaps = seeded.created ? seeded.gaps : loaded.brief?.gaps ?? [];
+  if (loaded.status === "unparseable") {
+    console.log(`! Brief exists but does not parse (${loaded.errors.join("; ")}). Fix it before the interview.`);
+  }
+  if (gaps.length) {
+    console.log(`\nGaps to confirm (${gaps.length}) — have the agent walk you through these:`);
+    for (const g of gaps) console.log(`  - ${g}`);
+  } else if (loaded.status === "ok") {
+    console.log("\nNo open gaps recorded.");
+  }
+  console.log("\nNext: ask the agent to run the brief interview (it maps your plain answers to the schema).");
   return 0;
 }
 
@@ -252,6 +286,7 @@ function usage(): void {
   thebashway build "<feature>" [--dry-run] [--no-drain]
                                          BUILD: design a new feature, then build it
   thebashway "<request>"                 auto-route to build or fix
+  thebashway brief                       (re)seed + print the per-project north star draft + its gaps
   thebashway audit-plan <target>         print the resolved plan (no model calls)
   thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
   thebashway check-sync                  report drift vs the lifeofbash engine
@@ -279,6 +314,8 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return cmdUpdate();
     case "audit-plan":
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
+    case "brief":
+      return cmdBrief(cwd, args, configPath);
     case "fix":
       return cmdFix(cwd, args, configPath);
     case "build":

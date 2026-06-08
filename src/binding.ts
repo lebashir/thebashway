@@ -82,6 +82,9 @@ export interface SweepBinding {
 export interface RailsBinding {
   territoryGlobs: string[];
   keywords: RegExp;
+  /** How aggressively classifyDrift flags a designed feature that contradicts the brief's
+   *  core scope. 'off' = kill switch. Default 'medium'. Resolved in the defineThebashway spread. */
+  briefDriftSensitivity?: "off" | "low" | "medium" | "high";
 }
 
 /** Hybrid learning stores. global is shared/cross-project (read); local is this repo's (read+write). */
@@ -89,6 +92,9 @@ export interface LearningBinding {
   global?: string | null;
   local: string;
   decisions: string;
+  /** The per-project design brief (north star). Path from repoRoot. Default `.thebashway/brief.ts`.
+   *  Resolved-with-default in the defineThebashway spread (NOT the throw guard). */
+  brief?: string;
 }
 
 export interface SinkBinding {
@@ -146,5 +152,9 @@ export function defineThebashway(b: ProjectBinding): ResolvedBinding {
     maxConcurrent: 6,
     seedPaths: [],
     ...b,
+    // Resolve the brief defaults AFTER ...b so they win, in this single resolution site
+    // (never the :140 throw guard). Optional-with-default preserves back-compat.
+    learning: { ...b.learning, brief: b.learning.brief ?? ".thebashway/brief.ts" },
+    rails: { ...b.rails, briefDriftSensitivity: b.rails.briefDriftSensitivity ?? "medium" },
   };
 }
