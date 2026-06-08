@@ -26,20 +26,32 @@ import { enqueueFindings } from "./queue-ops";
 import { buildIntakePromptFromDisk } from "./intake-prompt";
 import { runClaude } from "./headless";
 import { extractJsonBlock } from "./audit-run";
-import { SURFACES, DESIGN_MAX_TASKS } from "./config";
+import { SURFACES, DESIGN_MAX_TASKS, getBriefSensitivity } from "./config";
 import type { DrainReport } from "./drain";
+import { classifyDrift, renderBriefForPrompt, type DesignBrief } from "./brief";
+import { loadBrief, type LoadBriefResult } from "./load-brief";
 
 // ---------------------------------------------------------------------------
 // Seam contract
 // ---------------------------------------------------------------------------
 
 export interface DesignDeps {
-  /** Design the feature + choose its natural home. null = could not design. */
-  runDesign(description: string): Promise<FeatureDesign | null>;
-  /** Decompose a design into completable tasks ([] = none / failed). */
-  runDecompose(design: FeatureDesign): Promise<CompletableItem[]>;
+  /** Design the feature + choose its natural home. null = could not design. The optional
+   * pre-loaded `brief` is threaded into the design stage's intake prompt (the STABLE north-star
+   * layer) — passed pre-loaded so the run loads the brief ONCE (one load, one loud-signal). */
+  runDesign(description: string, brief?: DesignBrief | null): Promise<FeatureDesign | null>;
+  /** Decompose a design into completable tasks ([] = none / failed). The optional pre-loaded
+   * `brief` is threaded into the decompose stage's intake prompt (same one-load discipline). */
+  runDecompose(design: FeatureDesign, brief?: DesignBrief | null): Promise<CompletableItem[]>;
   /** Cold-review the design AND the task list (fresh). null = no usable verdict. */
   runReview(description: string, design: FeatureDesign, tasks: CompletableItem[]): Promise<DesignReview | null>;
+  /** Load the per-project north star for this run (defaults to the real loadBrief in
+   * defaultDesignDeps). Called ONCE per run when opts.briefPath is set. */
+  loadBrief?(briefPath: string): Promise<LoadBriefResult>;
+  /** Optional Opus Tier 2 alignment refinement, fired ONLY when the deterministic Tier-1
+   * classifyDrift returns material:true — refines reason/offer. Advisory only; it can NEVER set
+   * report.aborted, force needs-intake, or break a loop. */
+  runAlignmentCheck?(design: FeatureDesign, brief: DesignBrief): Promise<{ material: boolean; reason?: string; offer?: string }>;
   /** Run the OUT-door drain STAGED (land disabled, no-op notify) for `surface`, claiming
    * up to `n` and ONLY items whose title is in `allowTitles` (feature isolation — a
    * pre-existing queue item is never built nor folded into the landing decision). Returns
@@ -67,6 +79,10 @@ export interface DesignOptions {
    * landing to main. Deploy is the DEFAULT (`--no-land` sets this) — the only per-run "told not
    * to". Surfaces that always stage (e.g. a web UI) and the people/data rails are separate. */
   noLand?: boolean;
+  /** Path to the per-project north star (binding.learning.brief). When set, the run loads the
+   * brief ONCE, threads it into the design/decompose intake prompts, and runs the deterministic
+   * (advisory) alignment step. Omitted = today's behavior (no brief). */
+  briefPath?: string;
 }
 
 export interface DesignReport {
@@ -92,6 +108,11 @@ export interface DesignReport {
   landResult: string;
   summary: string;
   aborted?: string;
+  /** ADVISORY core-scope drift signal (spec 6). Set when the deterministic classifyDrift (Tier 1,
+   * optionally refined by runAlignmentCheck Tier 2) found the design contradicts the brief's core
+   * scope. NEVER sets aborted / forces needs-intake / breaks a loop — the build proceeds (build-
+   * anyway is the default). undefined = no brief, no drift, or sensitivity 'off'/unconfirmed. */
+  alignment?: { material: boolean; reason?: string; offer?: string };
 }
 
 const EMPTY_GATED = (): DesignReport["gated"] => ({
@@ -112,6 +133,9 @@ const EMPTY_GATED = (): DesignReport["gated"] => ({
 export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): Promise<DesignReport> {
   const maxTasks = opts.maxTasks ?? DESIGN_MAX_TASKS;
   const freezeAuthorized = opts.freezeAuthorized ?? true;
+  // `base()` reads the closed-over `alignment` at CALL time, so every report (incl. the staged/
+  // aborted paths reached after the design exists) carries the advisory drift signal — and the
+  // advisory signal alone never changes the build decision (aborts are decided elsewhere).
   const base = (over: Partial<DesignReport>): DesignReport => ({
     design: null,
     surface: null,
@@ -122,16 +146,68 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
     landed: false,
     landResult: "",
     summary: "",
+    ...(alignment ? { alignment } : {}),
     ...over,
   });
 
+  // 0. Load the north star ONCE for this whole run (one load => one loud-signal). It is threaded
+  //    pre-loaded into BOTH design stages' intake prompts (so the 3 callsites never re-load and
+  //    never re-emit a park) and feeds the deterministic alignment step below. PARSE-FAILURE LOUD
+  //    SIGNAL — single owner: an `unparseable` brief notifies EXACTLY ONCE (§3.1) and the run
+  //    degrades to today's behavior (no brief). `absent` is benign.
+  let brief: DesignBrief | null = null;
+  if (opts.briefPath) {
+    const load = deps.loadBrief ?? loadBrief;
+    const result = await load(opts.briefPath);
+    if (result.status === "unparseable") {
+      await deps.notify(`brief unparseable — north star not loaded; building without it: ${result.errors.join("; ")}`);
+    }
+    brief = result.brief; // null on 'absent' or 'unparseable' — never silently treats broken as ok
+  }
+
+  // The DETERMINISTIC alignment step (advisory only — spec 6), run ONCE against the FINAL design
+  // (after any structural-revise bounce so the advisory signal reflects what actually builds).
+  // classifyDrift tests the design's STRUCTURED output (surface + affectsTerritory) against the
+  // brief's core-scope fields; it is forced to {material:false} when the brief is unconfirmed or
+  // sensitivity is 'off'. When material, an optional Opus Tier 2 (runAlignmentCheck) refines the
+  // reason/offer. The result is surfaced advisory-only — it NEVER sets report.aborted, NEVER forces
+  // needs-intake, NEVER breaks the loop (default = build-anyway).
+  let alignment: DesignReport["alignment"] | undefined;
+  let alignmentNote = "";
+  const evaluateAlignment = async (d: FeatureDesign): Promise<void> => {
+    if (!brief) return;
+    const drift = classifyDrift(
+      { surface: d.surface, affectsTerritory: d.affectsTerritory, summary: d.summary },
+      brief,
+      getBriefSensitivity(),
+    );
+    if (!drift.material) {
+      alignment = undefined;
+      alignmentNote = "";
+      return;
+    }
+    let reason = drift.reason;
+    let offer: string | undefined;
+    if (deps.runAlignmentCheck) {
+      const tier2 = await deps.runAlignmentCheck(d, brief);
+      // Tier 2 refines the advisory signal but cannot DOWNGRADE the deterministic teeth: a Tier-1
+      // material verdict stays material (Tier 2 only sharpens reason/offer).
+      reason = tier2.reason ?? reason;
+      offer = tier2.offer;
+    }
+    alignment = { material: true, reason, offer };
+    alignmentNote = ` [alignment: off core scope — ${reason ?? "core-scope drift"}; build-anyway]`;
+    await deps.notify(`alignment warning (advisory, not blocking): ${reason ?? "core-scope drift"}${offer ? ` — ${offer}` : ""}`);
+  };
+
   // 1. Design.
-  let design = await deps.runDesign(opts.description);
+  let design = await deps.runDesign(opts.description, brief);
   if (!design) return base({ aborted: "could not design the feature", summary: "design failed" });
   let surface = opts.surface ?? design.surface;
+  await evaluateAlignment(design);
 
   // 2. Decompose.
-  let tasks = await deps.runDecompose(design);
+  let tasks = await deps.runDecompose(design, brief);
   if (!tasks.length) return base({ design, surface, aborted: "decompose produced no tasks", summary: "decompose failed" });
   if (tasks.length > maxTasks) {
     return base({
@@ -146,14 +222,15 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
   let review = await deps.runReview(opts.description, design, tasks);
   if (review?.designVerdict === "revise") {
     const feedback = `${opts.description}\n\nREVISION REQUIRED (a fresh review rejected the prior design): ${review.required.join("; ")}`;
-    const design2 = await deps.runDesign(feedback);
+    const design2 = await deps.runDesign(feedback, brief);
     if (!design2) {
       // Re-design after a structural rejection FAILED — never build the rejected design.
       return base({ design, surface, aborted: "re-design after a structural review failed; not building the rejected design", summary: "re-design failed" });
     }
     design = design2;
     surface = opts.surface ?? design.surface;
-    tasks = await deps.runDecompose(design);
+    await evaluateAlignment(design); // re-classify against the FINAL (revised) design
+    tasks = await deps.runDecompose(design, brief);
     if (!tasks.length) return base({ design, surface, aborted: "decompose produced no tasks after revision", summary: "decompose failed" });
     if (tasks.length > maxTasks) {
       return base({ design, surface, aborted: `feature too large after revision: ${tasks.length} > ${maxTasks}`, summary: `too large (${tasks.length} > ${maxTasks})` });
@@ -254,7 +331,7 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
       tasks,
       gated,
       enqueued: { appended: 0, skippedExisting: 0, buildReady: buildReadyTitles.length, needInput: tasks.length - buildReadyTitles.length },
-      summary: `dry-run: would queue ${tasks.length} (${buildReadyTitles.length} build-ready)`,
+      summary: `dry-run: would queue ${tasks.length} (${buildReadyTitles.length} build-ready)${alignmentNote}`,
     });
   }
 
@@ -272,7 +349,7 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
   // 7. Stop here if not draining or nothing is build-ready.
   if (opts.noDrain || buildReadyTitles.length === 0) {
     const why = opts.noDrain ? "--no-drain" : "nothing build-ready (all need your input)";
-    const summary = `design "${design.title}" — queued ${enqueued.appended} (${enqueued.buildReady} build-ready, ${enqueued.needInput} need input); not drained (${why})`;
+    const summary = `design "${design.title}" — queued ${enqueued.appended} (${enqueued.buildReady} build-ready, ${enqueued.needInput} need input); not drained (${why})${alignmentNote}`;
     await deps.notify(summary);
     return base({ design, surface, tasks, gated, enqueued, summary });
   }
@@ -315,7 +392,7 @@ export async function runFeatureDesign(opts: DesignOptions, deps: DesignDeps): P
   }
 
   const verb = landed ? "deployed" : "built + staged for review";
-  const summary = `design "${design.title}" — queued ${enqueued.appended} (${buildReadyTitles.length} build-ready); built ${drain.succeeded.length}, blocked ${drain.blocked.length}; ${verb}`;
+  const summary = `design "${design.title}" — queued ${enqueued.appended} (${buildReadyTitles.length} build-ready); built ${drain.succeeded.length}, blocked ${drain.blocked.length}; ${verb}${alignmentNote}`;
   await deps.notify(summary);
 
   return base({ design, surface, tasks, gated, enqueued, drain, landed, landResult, summary });
@@ -387,28 +464,34 @@ export function defaultDesignDeps(cfg: {
   notify: (text: string) => Promise<boolean>;
   runDrainStaged: (surface: string, n: number, allowTitles: string[]) => Promise<DrainReport>;
   landIntegration: (integrationBranch: string, landBranch: string) => Promise<{ ok: boolean; reason?: string }>;
+  /** The per-project north star path. Threaded into the design/decompose intake prompts as the
+   * STABLE layer; runFeatureDesign loads it ONCE and passes the loaded brief pre-loaded, so these
+   * callsites use the pre-loaded brief (briefPath is the fallback if a caller invokes them raw). */
+  briefPath?: string;
 }): DesignDeps {
   const roles = surfaceRoles();
 
   return {
-    async runDesign(description) {
+    async runDesign(description, brief) {
       const taskBody =
         `You are a senior engineer DESIGNING a feature for the lifeofbash substrate. Design it ` +
         `for what it IS, then choose its NATURAL home from these surface ROLES — NEVER default to ` +
         `organs:\n${roles}\n\nRead the repo to ground the design in what already exists and where new ` +
         `code belongs.\nFEATURE REQUEST: "${description}"\n\n` +
         `Output ONLY one JSON object in a \`\`\`json block:\n` +
-        `{"surface":"organs"|"tools","surfaceRationale":"...","title":"...","summary":"...","openQuestions":[...]}\n` +
+        `{"surface":"organs"|"tools","surfaceRationale":"...","title":"...","summary":"...","affectsTerritory":[globs],"openQuestions":[...]}\n` +
         `- surface: choose "organs" ONLY if the feature is intrinsically a web-hub UI VIEW the user ` +
         `explicitly wants online; otherwise "tools". Ambiguous → "tools".\n` +
+        `- affectsTerritory: the glob list this feature will touch (the dirs/files it will add or ` +
+        `change), so the north-star alignment check can compare it to the project's core scope.\n` +
         `- openQuestions: ONLY genuine ambiguities a human must resolve; resolve everything else from ` +
         `the code + the decision defaults. Empty is the goal.`;
-      const prompt = await buildIntakePromptFromDisk({ decisionsPath: cfg.decisionsPath, itemAreas: ["tools", "organs"], taskBody });
+      const prompt = await buildIntakePromptFromDisk({ decisionsPath: cfg.decisionsPath, itemAreas: ["tools", "organs"], taskBody, brief, briefPath: cfg.briefPath });
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
       return res.ok ? parseFeatureDesign(res.stdout) : null;
     },
 
-    async runDecompose(design) {
+    async runDecompose(design, brief) {
       const dir = SURFACES[design.surface]?.dir ?? design.surface;
       const taskBody =
         `Decompose this DESIGNED feature into COMPLETABLE build tasks for the autonomous OUT door.\n` +
@@ -427,7 +510,7 @@ export function defaultDesignDeps(cfg: {
         `deletes/destroys unrecoverable data. Be honest — these force a human gate, never auto-built.\n` +
         `- status:"needs-intake"+openQuestion for anything not fully specified; "unclaimed" only when fully ` +
         `specified.\n- At most ${DESIGN_MAX_TASKS} tasks; if it needs more it is too large.`;
-      const prompt = await buildIntakePromptFromDisk({ decisionsPath: cfg.decisionsPath, itemAreas: [design.surface], taskBody });
+      const prompt = await buildIntakePromptFromDisk({ decisionsPath: cfg.decisionsPath, itemAreas: [design.surface], taskBody, brief, briefPath: cfg.briefPath });
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
       return res.ok ? parseDecomposition(res.stdout) : [];
     },
@@ -448,6 +531,37 @@ export function defaultDesignDeps(cfg: {
         `over-reaching, or that you cannot confirm belongs to the requested feature.`;
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
       return res.ok ? parseDesignReview(res.stdout) : null;
+    },
+
+    // Real brief loader — wired so runFeatureDesign loads the north star once per run.
+    loadBrief,
+
+    // Opt-in Opus Tier 2: only constructed-and-called by runFeatureDesign when the deterministic
+    // Tier-1 classifyDrift already returned material:true, so model cost is gated to rare drift.
+    async runAlignmentCheck(design, brief) {
+      const prompt =
+        `You are judging whether a DESIGNED feature drifts from this project's CORE SCOPE (its north ` +
+        `star). The deterministic pre-filter already flagged a possible core-scope contradiction; ` +
+        `refine that judgement.\n\nNORTH STAR:\n${renderBriefForPrompt(brief)}\n\n` +
+        `DESIGN: ${JSON.stringify({ surface: design.surface, title: design.title, summary: design.summary, affectsTerritory: design.affectsTerritory })}\n\n` +
+        `Is this a MATERIAL contradiction of the project's core scope (out of in-scope surfaces, into ` +
+        `forbidden surfaces/territory)? This is ADVISORY only — the build proceeds either way.\n` +
+        `Output ONLY one JSON object in a \`\`\`json block: {"material":bool,"reason":"...","offer":"..."}\n` +
+        `- offer: a short next-step suggestion (reshape / update the brief / build-anyway).`;
+      const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
+      if (!res.ok) return { material: true }; // model unavailable → keep the Tier-1 verdict, unrefined
+      const block = extractJsonBlock(res.stdout);
+      if (!block) return { material: true };
+      try {
+        const o = JSON.parse(block) as { material?: unknown; reason?: unknown; offer?: unknown };
+        return {
+          material: o.material !== false, // Tier 2 may NOT downgrade a Tier-1 material verdict
+          reason: typeof o.reason === "string" ? o.reason : undefined,
+          offer: typeof o.offer === "string" ? o.offer : undefined,
+        };
+      } catch {
+        return { material: true };
+      }
     },
 
     runDrainStaged: cfg.runDrainStaged,

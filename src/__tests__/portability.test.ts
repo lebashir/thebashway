@@ -2,9 +2,19 @@
 // zero lifeofbash leakage. setBinding swaps the project-specific values in place;
 // resetBinding restores the defaults so other test files are unaffected.
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { setBinding, resetBinding, SURFACES, AUDIT_TARGETS, getDefaultSurface, getRepoRoot } from "../engine/config";
+import {
+  setBinding,
+  resetBinding,
+  SURFACES,
+  AUDIT_TARGETS,
+  getDefaultSurface,
+  getRepoRoot,
+  getBriefPath,
+  getBriefSensitivity,
+} from "../engine/config";
 import { resolveTarget } from "../engine/audit";
 import { binding as nextjs } from "../../examples/nextjs-minimal.config";
+import { binding as lifeofbash } from "../../examples/lifeofbash.config";
 
 beforeEach(() => setBinding(nextjs));
 afterEach(() => resetBinding());
@@ -43,9 +53,30 @@ test("getRepoRoot reflects the injected binding", () => {
   expect(getRepoRoot()).toBe("/tmp/nextjs-app");
 });
 
+test("getBriefPath / getBriefSensitivity are set by setBinding (nextjs: brief path + default sensitivity)", () => {
+  // the nextjs config declares brief '.thebashway/brief.ts' and NO briefDriftSensitivity (=> 'medium')
+  expect(getBriefPath()).toBe(".thebashway/brief.ts");
+  expect(getBriefSensitivity()).toBe("medium");
+});
+
+test("getBriefPath reflects a DIFFERENT injected binding (lifeofbash points elsewhere)", () => {
+  setBinding(lifeofbash);
+  expect(getBriefPath()).toBe("tools/orchestrator/brief.ts");
+  expect(getBriefSensitivity()).toBe("medium");
+});
+
 test("resetBinding restores the lifeofbash defaults", () => {
   resetBinding();
   expect(Object.keys(SURFACES).sort()).toEqual(["organs", "tools"]);
   expect(AUDIT_TARGETS.money).toBeDefined();
   expect(getDefaultSurface()).toBe("tools");
+});
+
+test("resetBinding restores the brief accessors — no cross-contamination after a swap", () => {
+  // swap to lifeofbash (a different brief path) then reset; the accessors must return to defaults.
+  setBinding(lifeofbash);
+  expect(getBriefPath()).toBe("tools/orchestrator/brief.ts");
+  resetBinding();
+  expect(getBriefPath()).toBe(".thebashway/brief.ts");
+  expect(getBriefSensitivity()).toBe("medium");
 });

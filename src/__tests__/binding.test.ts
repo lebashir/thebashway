@@ -40,3 +40,29 @@ test("throws when there are no surfaces", () => {
 test("throws when learning paths are missing", () => {
   expect(() => defineThebashway({ ...minimal, learning: { local: "", decisions: "" } })).toThrow(/learning/);
 });
+
+// --- north-star: brief + briefDriftSensitivity defaults (resolved in the spread, NOT the :140 guard) ---
+
+test("the minimal fixture still resolves — the :140 guard does NOT throw on a brief-less learning block", () => {
+  // minimal.learning has NO `brief`; the throw guard must keep throwing only on missing local/decisions.
+  expect(() => defineThebashway(minimal)).not.toThrow();
+});
+
+test("defineThebashway defaults brief + briefDriftSensitivity when omitted", () => {
+  const b = defineThebashway(minimal);
+  expect(b.learning.brief).toBe(".thebashway/brief.ts");
+  expect(b.rails.briefDriftSensitivity).toBe("medium");
+});
+
+test("defineThebashway preserves an explicit brief + briefDriftSensitivity (default does not clobber)", () => {
+  const b = defineThebashway({
+    ...minimal,
+    learning: { ...minimal.learning, brief: "custom/brief.ts" },
+    rails: { ...minimal.rails, briefDriftSensitivity: "off" },
+  });
+  expect(b.learning.brief).toBe("custom/brief.ts");
+  expect(b.rails.briefDriftSensitivity).toBe("off");
+  // the rest of the learning/rails block survives the spread
+  expect(b.learning.local).toBe(".thebashway/lessons.md");
+  expect(b.rails.keywords).toBeInstanceOf(RegExp);
+});

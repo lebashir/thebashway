@@ -11,6 +11,9 @@ and settings reference.
 | `thebashway fix <target> [--dry-run] [--no-land]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging + deploying. |
 | `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. |
 | `thebashway "<request>"` | Auto-route the request to Build or Fix. |
+| `thebashway brief` | **North star.** (Re)draft the per-project design brief from repo signals if missing, then print its path + the gaps to confirm. The brief is the project's living definition: purpose, who it serves, in/out-of-scope surfaces, conventions/glossary, and machine-checkable success criteria. It guides every build/fix/audit and is the goal-set `run-to-goal` drives toward. Non-interactive — the conversational interview that fills the gaps runs in the agent (the plugin skill). The brief is written only by you (or the interview), never silently by the engine. |
+| `thebashway run-to-goal [--target <id,…>]` | **Autonomous to a goal.** Loop build→check→repeat until the brief's success criteria are met, then stop. `--target` aims at a *slice* of the criteria (PART); omitted drives **all required** criteria (ALL). Bounded by required caps (`maxIterations` default 5, a wall-clock backstop, and a build-spend ceiling) + a no-progress stall stop. Refuses to terminate on an **unconfirmed** brief; reports `goal-fully-met` only for the whole star vs `target-slice-met` for a slice; any open **milestone** parks for you instead of declaring done. |
+| `thebashway reflect [--milestone <label>] [--epic] [--learned <note>] [--propose <delta>]` | **Milestone reflection (Loop C).** Log a reflection to the run log and — only on an explicit `--milestone`/`--epic` marker — stage a single, batched, rate-limited **brief-update proposal** through the human-gate (`queue.md @parked` + `NOW.md ## Parked`). It never writes the brief; you review and apply. |
 | `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
 | `thebashway update` | Update the thebashway clone in place: `git pull --ff-only` + `bun install`. Reaches every project that uses it (they share the one clone); per-project config/state is untouched. Refuses on a dirty tree or a non-git install. |
 | `thebashway check-sync` | Report commits to the lifeofbash engine since this package was last reconciled (drift). |
@@ -57,7 +60,13 @@ export default defineThebashway({
     global: null,                 // shared cross-project lessons file (read), or null
     local: ".thebashway/lessons.md",     // this repo's lessons (read + write)
     decisions: ".thebashway/decisions.md",
+    brief: ".thebashway/brief.ts",       // the north star (optional; this is the default)
   },
+
+  // Optional: how sensitive the design-door drift warning is to a feature that lands outside
+  // the brief's declared core scope. 'off' | 'low' | 'medium' (default) | 'high'. Advisory only —
+  // it never blocks a build, only surfaces a note. Lives on `rails`.
+  // rails: { ..., briefDriftSensitivity: "medium" },
 
   sinks: { /* notify, eventSink, statusFile — all optional, default no-ops */ },
   breaker: { maxFailures: 2, window: 3 },

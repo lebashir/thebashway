@@ -33,6 +33,10 @@ import { appendLesson } from "./lessons";
 import { appendDigest } from "./digest";
 import { bunRun } from "./verify/run";
 import type { VerifyManifest } from "./verify/types";
+import type { DesignBrief } from "./brief";
+import { loadBrief as realLoadBrief, type LoadBriefResult } from "./load-brief";
+import { evaluateCheckSpec } from "./brief-eval";
+import { goalMet } from "./breaker";
 
 // ---------------------------------------------------------------------------
 // Seam contracts
@@ -89,6 +93,23 @@ export interface DrainDeps {
   appendLessonFn(line: string): Promise<void>;
   /** Append a digest record to the run log. */
   appendDigestFn(rec: DigestRecord): Promise<void>;
+  /**
+   * OPTIONAL in-drain early-stop oracle (spec 5.4). Undefined => today's behavior (the drain
+   * never early-stops on a brief goal). When `stopWhenBriefMet` is set, the loop calls this
+   * after each SUCCESSFUL integrate to ask "is the target met now?" — if true the loop breaks
+   * before the next claim (gating NEW CLAIMS only; it never bypasses the breaker/land/safety
+   * gates). `target` is the slice runToGoal is driving toward; omitted => the real impl uses
+   * ALL required ids (back-compat). The reducer + evaluator it composes are tested separately;
+   * this seam is never executed in unit tests.
+   */
+  briefSatisfied?(brief: DesignBrief, target?: Set<string>): Promise<boolean>;
+  /**
+   * OPTIONAL brief loader (spec 5.4). Used ONLY when `stopWhenBriefMet` is set, to load the
+   * brief ONCE per drain so `briefSatisfied` has a `brief` in scope. Undefined (the default)
+   * leaves every existing fake untouched — the early-stop seam is simply inert. Defaults to the
+   * real `loadBrief` in `defaultDrainDeps`.
+   */
+  loadBrief?(briefPath: string): Promise<LoadBriefResult>;
 }
 
 export interface DrainOptions {
@@ -114,6 +135,22 @@ export interface DrainOptions {
   session?: string;
   dryRun?: boolean;
   noPreflight?: boolean;
+  /**
+   * OPT-IN in-drain EARLY-STOP (spec 5.4). When true (and `deps.briefSatisfied` is wired), the
+   * loop stops claiming NEW items as soon as the brief target is met after a successful integrate
+   * — a single-drain early-stop, NOT a loop (looping is runToGoal's job). It gates NEW CLAIMS
+   * only: it never bypasses the breaker, `unsafeIntegrationBranch`, feature-atomic landing, or
+   * the default-on land (what is green still lands via `landFn`). The feature-isolated design-door
+   * drain (`claimTitles` set => `allowTitles`) IGNORES this flag (it is feature-atomic and must
+   * not self-terminate on a global goal). Default false => today's behavior.
+   */
+  stopWhenBriefMet?: boolean;
+  /** The success-criterion id slice the early-stop drives toward (passed through to
+   * `briefSatisfied`'s `target`). Omitted => the real `briefSatisfied` uses all required ids. */
+  targetCriteria?: string[];
+  /** Path to the brief.ts module — loaded ONCE via `deps.loadBrief` only when `stopWhenBriefMet`
+   * is set. Unused otherwise (existing drains never load a brief). */
+  briefPath?: string;
 }
 
 export interface DrainReport {
@@ -133,6 +170,9 @@ export interface DrainReport {
   summaryLines: string[];
   /** Set (and the run is a no-op) when the run aborts before processing. */
   aborted?: string;
+  /** Set true when the in-drain early-stop (spec 5.4 `stopWhenBriefMet`) fired: the brief target
+   * was met after a successful integrate, so the loop stopped claiming new items. */
+  goalMet?: boolean;
 }
 
 function branchSlug(title: string): string {
@@ -206,6 +246,18 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
 
   const recent: boolean[] = [];
   const mergedTerritories: string[] = [];
+
+  // In-drain EARLY-STOP seam (spec 5.4). Honored ONLY when stopWhenBriefMet is set AND this is
+  // NOT the feature-isolated design-door drain (allowTitles set => feature-atomic; it must never
+  // self-terminate on a global goal). Load the brief ONCE here, guarded so existing fakes with no
+  // loadBrief dep are untouched.
+  const earlyStopEnabled = !!opts.stopWhenBriefMet && allowTitles === undefined;
+  let earlyStopBrief: DesignBrief | null = null;
+  if (earlyStopEnabled && deps.loadBrief && opts.briefPath) {
+    const loaded = await deps.loadBrief(opts.briefPath);
+    earlyStopBrief = loaded.status === "ok" ? loaded.brief : null;
+  }
+  const earlyStopTarget = opts.targetCriteria ? new Set(opts.targetCriteria) : undefined;
 
   // Claim ONE item at a time: a breaker trip then leaves nothing stuck @claimed,
   // and each claim sees the freshest queue (serial integration).
@@ -293,6 +345,18 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
     if (shouldTrip(recent, breaker.maxFailures, breaker.window)) {
       report.breakerTripped = true;
       break;
+    }
+
+    // In-drain EARLY-STOP (spec 5.4): after a SUCCESSFUL integrate, if the brief target is met,
+    // stop claiming NEW items. This NEVER bypasses the breaker (checked above), the land step
+    // (runs below on succeeded>0), or any safety gate — it only short-circuits the claim loop.
+    // Inert unless stopWhenBriefMet + a wired briefSatisfied + a loaded brief; ignored for the
+    // feature-isolated design-door drain (allowTitles set).
+    if (outcome && earlyStopEnabled && earlyStopBrief && deps.briefSatisfied) {
+      if (await deps.briefSatisfied(earlyStopBrief, earlyStopTarget)) {
+        report.goalMet = true;
+        break;
+      }
     }
   }
 
@@ -553,5 +617,25 @@ export function defaultDrainDeps(cfg: {
     async appendDigestFn(rec) {
       await appendDigest(cfg.runLogPath, rec);
     },
+
+    // The real in-drain early-stop oracle (spec 5.4). Evaluates every success criterion via
+    // evaluateCheckSpec, then reduces with goalMet over the TARGET set (omitted => all REQUIRED
+    // ids — back-compat). NOT executed in unit tests; the reducer (goalMet) and the evaluator
+    // (evaluateCheckSpec) are each tested in isolation.
+    async briefSatisfied(brief, target) {
+      const sc = SURFACES[cfg.surface];
+      const surface = sc
+        ? { dir: resolve(cfg.repoRoot, sc.dir), env: sc.env, chain: sc.chain }
+        : undefined;
+      const checked: Record<string, boolean> = {};
+      for (const c of brief.successCriteria) {
+        const { pass } = await evaluateCheckSpec(c.check, { repoRoot: cfg.repoRoot, run: bunRun, surface });
+        checked[c.id] = pass;
+      }
+      const allRequiredIds = new Set(brief.successCriteria.filter((c) => c.required).map((c) => c.id));
+      return goalMet(checked, target ?? allRequiredIds);
+    },
+
+    loadBrief: realLoadBrief,
   };
 }

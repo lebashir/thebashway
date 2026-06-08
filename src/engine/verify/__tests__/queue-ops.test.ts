@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claimNext, claimNextN, markBlocked, markDone, appendItem, parkItem, unparkScan } from "../../queue-ops";
+import { claimNext, claimNextN, markBlocked, markDone, appendItem, ensureParkItem, parkItem, unparkScan } from "../../queue-ops";
 import { parseQueue, serializeItem, type QueueItem } from "../../queue";
 
 function seed(): string {
@@ -134,6 +134,36 @@ test("appendItem adds a new item, header preserved", async () => {
   expect(text).toContain("# build queue"); // header kept
   const items = await readItems(p);
   expect(items.map((i) => i.title)).toEqual(["A", "B", "C"]);
+  unlinkSync(p);
+});
+
+test("ensureParkItem creates a lightweight @unclaimed placeholder when the title is absent", async () => {
+  const p = seed(); // contains A, B only
+  const created = await ensureParkItem("brief-update proposed", "narrow scope", p);
+  expect(created).toBe(true);
+  const items = await readItems(p);
+  const added = items.find((i) => i.title === "brief-update proposed");
+  expect(added).toBeDefined();
+  expect(added?.status).toBe("unclaimed");
+  expect(added?.origin).toBe("auto");
+  expect(added?.goal).toBe("narrow scope");
+  // Now parkItem has a target to flip — the missing half of the human-gate.
+  const affected = await parkItem("brief-update proposed", "narrow scope", p);
+  expect(affected).toContain("brief-update proposed");
+  expect((await readItems(p)).find((i) => i.title === "brief-update proposed")?.status).toBe("parked");
+  unlinkSync(p);
+});
+
+test("ensureParkItem is a no-op when an item with that title already exists (any status)", async () => {
+  const p = seed();
+  // Park A first so it's @parked, then ensure A again — must NOT create a duplicate.
+  await parkItem("A", "prior", p);
+  const created = await ensureParkItem("A", "different reason", p);
+  expect(created).toBe(false);
+  const matches = (await readItems(p)).filter((i) => i.title === "A");
+  expect(matches).toHaveLength(1);
+  expect(matches[0].status).toBe("parked"); // unchanged by the no-op ensure
+  expect(matches[0].parkReason).toBe("prior");
   unlinkSync(p);
 });
 

@@ -27,5 +27,5 @@ export const binding = defineThebashway({
     territoryGlobs: ["src/server/email/**"],
     keywords: /\b(?:send|email|delete|deploy)\b/i,
   },
-  learning: { global: null, local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md" },
+  learning: { global: null, local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md", brief: ".thebashway/brief.ts" },
 });

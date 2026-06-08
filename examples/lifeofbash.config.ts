@@ -113,6 +113,7 @@ export const binding = defineThebashway({
     global: "/Users/bachir.habib/lifeofbash/memory/operating-lessons.md",
     local: "/Users/bachir.habib/lifeofbash/tools/orchestrator/lessons.md",
     decisions: "/Users/bachir.habib/lifeofbash/tools/orchestrator/decisions.md",
+    brief: "tools/orchestrator/brief.ts",
   },
 });
 

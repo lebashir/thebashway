@@ -301,8 +301,19 @@ export function defaultAuditDeps(cfg: {
   surface: string;
   /** "correctness" (default) hunts logic defects; "design" hunts design-system deviations. */
   auditKind?: "correctness" | "design";
+  /** The per-project north star path. Threaded into the SHAPER's intake prompt ONLY (prompt-
+   * context — so the shaper can justify a finding against the north star and may itself choose
+   * needs-intake + an openQuestion). NO new deterministic gate, and it MUST NEVER raise the
+   * needs-intake count for design-kind findings (those are already parked at :131). */
+  briefPath?: string;
+  /** Optional loud-signal sink for an unparseable brief surfaced while shaping (the §3.1 single
+   * signal). Absent/ok stay benign. */
+  notify?: (text: string) => Promise<boolean> | void;
 }): AuditDeps {
   const designMode = cfg.auditKind === "design";
+  // The §3.1 loud signal is emitted at most ONCE per audit run even though runShape is called per
+  // finding — a botched brief edit should warn once, not once-per-finding.
+  let briefSignalEmitted = false;
   // NOTE: these audit dispatches build their prompts INLINE (runFinder/runVerify here, runShape via
   // buildIntakePromptFromDisk) — they never route through buildBashaPrompt, so the standing design
   // bar is structurally NEVER present in them. The ONLY design-bar injection is the deliberate one
@@ -373,6 +384,16 @@ export function defaultAuditDeps(cfg: {
         decisionsPath: cfg.decisionsPath,
         itemAreas: [cfg.surface],
         taskBody,
+        briefPath: cfg.briefPath,
+        onBriefStatus: (r) => {
+          // §3.1 single loud signal: an unparseable brief surfaced while shaping is reported once.
+          if (r.status === "unparseable" && !briefSignalEmitted) {
+            briefSignalEmitted = true;
+            const msg = `brief unparseable — north star not loaded for the audit shaper: ${r.errors.join("; ")}`;
+            if (cfg.notify) void cfg.notify(msg);
+            else console.error(`[audit] ${msg}`);
+          }
+        },
       });
       const res = await runClaude({ prompt, cwd: cfg.repoRoot, model: "opus" });
       if (!res.ok) return null;

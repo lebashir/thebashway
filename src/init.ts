@@ -93,6 +93,7 @@ ${chainLines || "        // No build/test scripts detected — add your verify c
     global: ${globalLessons ? JSON.stringify(globalLessons) : "null"},
     local: ".thebashway/lessons.md",
     decisions: ".thebashway/decisions.md",
+    brief: ".thebashway/brief.ts",
   },
 });
 `;
@@ -100,6 +101,306 @@ ${chainLines || "        // No build/test scripts detected — add your verify c
 
 const LESSONS_SEED = "# Build lessons (this repo)\n\n## Active\n\n## Graduated\n";
 const DECISIONS_SEED = "# Intake decisions (this repo)\n\n## Active\n\n## Graduated\n";
+
+// ---------------------------------------------------------------------------
+// The per-project design brief (north star) cold-start seed. See spec 4.1.
+// `seedBriefIfAbsent` (below) is the ONLY init writer of brief.ts (INV-A).
+// ---------------------------------------------------------------------------
+
+/** The fields a seeded brief module carries (a subset of DesignBrief; the rest take schema defaults). */
+interface BriefDraftFields {
+  confirmed: boolean;
+  narrative: string;
+  purpose: string;
+  whyNow: string;
+  whoServed: string;
+  scope: string;
+  limits: string;
+  conventions: string[];
+  glossary: { term: string; means: string }[];
+  gaps: string[];
+  successCriteria: unknown[];
+}
+
+// The seeded successCriteria: a verify entry marked required:false (cannot ALONE terminate) PLUS a
+// single required `command` placeholder whose run fails until a human edits it. This satisfies the
+// .refine() (a required `command` slot exists) so the brief LOADS, but `goalMet` cannot trip until
+// the placeholder is replaced — "born terminable" = "has a real, not-yet-satisfied goal", never
+// "trivially already done" (spec 3.2 / 4.1).
+const SEED_CRITERIA = [
+  {
+    id: "verify",
+    statement: "the project's existing verify chain passes",
+    check: { kind: "verify" },
+    required: false,
+  },
+  {
+    id: "purpose-check",
+    statement: "REPLACE-ME: the command that proves the north star is met",
+    check: { kind: "command", run: "echo REPLACE-ME && exit 1" },
+    required: true,
+  },
+];
+
+// The gap that flags the unfilled `command` placeholder (an EXPECTED, non-blocking cold-start state).
+const COMMAND_PLACEHOLDER_GAP =
+  "# GAP: success command (replace `echo REPLACE-ME && exit 1` with the check that proves the north star is met; an unfilled placeholder is an expected cold-start state that only disables autonomous-to-goal)";
+
+// Every section the empty-repo seed cannot infer.
+const EMPTY_REPO_GAPS = [
+  "# GAP: purpose",
+  "# GAP: why now",
+  "# GAP: who is served",
+  "# GAP: scope (in-scope surfaces)",
+  "# GAP: limits (forbidden surfaces / territory)",
+  "# GAP: conventions (how we work)",
+  "# GAP: glossary (domain terms)",
+  COMMAND_PLACEHOLDER_GAP,
+];
+
+/** Serialize a brief draft to a `brief.ts` module that `export default`s a zod-loadable object (INV-B). */
+function briefModule(fields: BriefDraftFields): string {
+  const obj = {
+    confirmed: fields.confirmed,
+    narrative: fields.narrative,
+    purpose: fields.purpose,
+    whyNow: fields.whyNow,
+    whoServed: fields.whoServed,
+    scope: fields.scope,
+    limits: fields.limits,
+    inScopeSurfaces: [] as string[],
+    forbiddenSurfaces: [] as string[],
+    forbiddenTerritory: [] as string[],
+    conventions: fields.conventions,
+    glossary: fields.glossary,
+    gaps: fields.gaps,
+    successCriteria: fields.successCriteria,
+    milestones: [] as unknown[],
+  };
+  return `// .thebashway/brief.ts — the per-project DESIGN BRIEF (north star).
+// Drafted by \`thebashway init\` from repo signals; confirm + fill the # GAPs with the agent
+// (run \`thebashway brief\`, then have it walk you through the questions). A TS module that
+// \`export default\`s a zod-validated object — edit freely, keep it loadable.
+export default ${JSON.stringify(obj, null, 2)};
+`;
+}
+
+// The empty-repo brief skeleton (sibling to LESSONS_SEED/DECISIONS_SEED). All narrative empty,
+// conventions/glossary empty, gaps listing every section, confirmed:false, and the seeded
+// verify(required:false) + command(placeholder) criteria. Loads but is NOT trivially terminable.
+const BRIEF_SEED = briefModule({
+  confirmed: false,
+  narrative: "",
+  purpose: "",
+  whyNow: "",
+  whoServed: "",
+  scope: "",
+  limits: "",
+  conventions: [],
+  glossary: [],
+  gaps: EMPTY_REPO_GAPS,
+  successCriteria: SEED_CRITERIA,
+});
+
+/** The repo signals the brief draft is inferred from. Gathered ONLY on the create path (spec 4.1). */
+export interface BriefInputs {
+  name: string;
+  description: string;
+  scripts: Record<string, string>;
+  readmeFirstPara: string;
+  isNext: boolean;
+  runner: Runner;
+  gitLog: string[];
+}
+
+/**
+ * Read the repo signals an inferred brief draft is built from: package.json name+description+scripts,
+ * the README first paragraph, and `git log --oneline -20`. SYNC (so runInit stays sync); mirrors
+ * runInit's existing spawnSync git calls. Gathered ONLY behind the !existsSync create check, so an
+ * idempotent re-run does ZERO inference I/O.
+ */
+export function gatherBriefInputs(dir: string): BriefInputs {
+  let name = "";
+  let description = "";
+  let scripts: Record<string, string> = {};
+  const pkgPath = join(dir, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+        name?: string;
+        description?: string;
+        scripts?: Record<string, string>;
+      };
+      name = pkg.name ?? "";
+      description = pkg.description ?? "";
+      scripts = pkg.scripts ?? {};
+    } catch {
+      /* leave defaults */
+    }
+  }
+
+  let readmeFirstPara = "";
+  for (const f of ["README.md", "readme.md", "README"]) {
+    const p = join(dir, f);
+    if (existsSync(p)) {
+      try {
+        const raw = readFileSync(p, "utf8");
+        readmeFirstPara = firstParagraph(raw);
+      } catch {
+        /* ignore */
+      }
+      break;
+    }
+  }
+
+  const runner = detectRunner(dir);
+  const isNext = ["next.config.js", "next.config.mjs", "next.config.ts"].some((f) =>
+    existsSync(join(dir, f)),
+  );
+
+  let gitLog: string[] = [];
+  const log = spawnSync("git", ["log", "--oneline", "-20"], { cwd: dir, encoding: "utf8" });
+  if (log.status === 0) {
+    gitLog = log.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  }
+
+  return { name, description, scripts, readmeFirstPara, isNext, runner, gitLog };
+}
+
+/** The first non-heading, non-empty Markdown paragraph (a one-shot prose grab for the brief). */
+function firstParagraph(md: string): string {
+  const lines = md.split("\n");
+  const para: string[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) {
+      if (para.length) break; // blank line ends the first paragraph
+      continue; // skip leading blanks
+    }
+    if (t.startsWith("#") || t.startsWith("![") || t.startsWith("<!--")) {
+      if (para.length) break;
+      continue; // skip headings/badges/comments before the prose starts
+    }
+    para.push(t);
+  }
+  return para.join(" ").trim();
+}
+
+/** The `<runner> run <script>` invocation a convention bullet should mention. */
+function scriptInvocation(runner: Runner, script: string): string {
+  return runner === "bun" ? `bun run ${script}` : `${runner} run ${script}`;
+}
+
+/**
+ * PROPER-NOUN-ish candidate domain terms: a coined product name and Capitalized/CamelCase tokens in
+ * the README/description. NEVER a generic lowercase single word (e.g. "app", "cli", "tool") — that is
+ * an unconfident guess, so it is left out and the caller records a glossary # GAP instead. The seed
+ * never invents a meaning it can't ground.
+ */
+function candidateGlossaryTerms(inputs: BriefInputs): string[] {
+  const terms = new Set<string>();
+  // The product name counts ONLY if it is proper-noun-ish: contains an uppercase letter (CamelCase /
+  // PascalCase) OR is a multi-word coined name (had a hyphen/underscore). A bare generic lowercase
+  // single word is not confident enough to be a domain term.
+  const rawName = inputs.name.replace(/^@[^/]+\//, "");
+  const cleanName = rawName.replace(/[-_]/g, " ").trim();
+  const isCoinedName = /[A-Z]/.test(rawName) || /[-_]/.test(rawName);
+  if (cleanName && isCoinedName) terms.add(cleanName);
+  const haystack = `${inputs.description} ${inputs.readmeFirstPara}`;
+  // CamelCase or Capitalized multi-letter tokens that look like a coined product/domain term.
+  for (const m of haystack.matchAll(/\b([A-Z][a-zA-Z]{3,}(?:[A-Z][a-zA-Z]+)*)\b/g)) {
+    terms.add(m[1]);
+  }
+  return [...terms].slice(0, 6);
+}
+
+/**
+ * Pure: infer a brief DRAFT from the gathered repo signals. Fills purpose/whyNow/whoServed/narrative
+ * it can guess, seeds successCriteria with the verify(required:false) + command(placeholder) pair,
+ * seeds conventions from scripts + the detected build/deploy chain + the runner, seeds glossary from
+ * proper-noun-ish terms with PLACEHOLDER means (never invents a meaning), confirmed:false ALWAYS, and
+ * records every un-inferred section in gaps. Returns the module text + the gap list. (Spec 4.1.)
+ */
+export function inferBriefDraft(inputs: BriefInputs): { module: string; gaps: string[] } {
+  const gaps: string[] = [];
+
+  // --- narrative fields (guess where the repo betrays the answer, else gap) ---
+  const purpose = inputs.description || inputs.readmeFirstPara || "";
+  if (!purpose) gaps.push("# GAP: purpose");
+  const narrative = inputs.readmeFirstPara || inputs.description || "";
+
+  gaps.push("# GAP: why now");
+  gaps.push("# GAP: who is served");
+  gaps.push("# GAP: scope (in-scope surfaces)");
+  gaps.push("# GAP: limits (forbidden surfaces / territory)");
+
+  // --- conventions: lean bullets from scripts + detected build/deploy chain + runner ---
+  const conventions: string[] = [];
+  conventions.push(`Package manager: ${inputs.runner}.`);
+  if (inputs.scripts.test) {
+    conventions.push(
+      `Tests run via \`${scriptInvocation(inputs.runner, "test")}\`; rely on the green gate, don't build a new harness for a small fix.`,
+    );
+  }
+  if (inputs.scripts.build || inputs.isNext) {
+    const buildCmd = inputs.scripts.build ? `\`${scriptInvocation(inputs.runner, "build")}\`` : "the build";
+    conventions.push(`Build/land norm: ${buildCmd} must pass before landing.`);
+  }
+  if (inputs.scripts.deploy) {
+    conventions.push(`Deploy via \`${scriptInvocation(inputs.runner, "deploy")}\`.`);
+  }
+  if (!inputs.scripts.test) gaps.push("# GAP: testing convention");
+  if (!inputs.scripts.build && !inputs.isNext) gaps.push("# GAP: deploy/land norm");
+
+  // --- glossary: proper-noun-ish terms with PLACEHOLDER means (unconfident => a gap, not a guess) ---
+  const candidates = candidateGlossaryTerms(inputs);
+  const glossary = candidates.map((term) => ({ term, means: "REPLACE-ME: what this means" }));
+  if (glossary.length === 0) gaps.push("# GAP: glossary (domain terms)");
+
+  // --- the command placeholder is always a gap (an expected cold-start state) ---
+  gaps.push(COMMAND_PLACEHOLDER_GAP);
+
+  const module = briefModule({
+    confirmed: false, // never ratified by inference
+    narrative,
+    purpose,
+    whyNow: "",
+    whoServed: "",
+    scope: "",
+    limits: "",
+    conventions,
+    glossary,
+    gaps,
+    successCriteria: SEED_CRITERIA,
+  });
+
+  return { module, gaps };
+}
+
+/**
+ * The ONLY init writer of brief.ts (INV-A). If the brief is absent: gather repo signals (create-path
+ * only — the gather is guarded behind this !existsSync check so an idempotent re-run does ZERO
+ * inference I/O) and write the inferred draft. Returns whether it created the brief + the gap list.
+ */
+export function seedBriefIfAbsent(dir: string, briefPath: string): { created: boolean; gaps: string[] } {
+  if (existsSync(briefPath)) return { created: false, gaps: [] };
+  const inputs = gatherBriefInputs(dir);
+  // When the repo betrays nothing to infer from, fall back to the empty-repo skeleton (the interview
+  // carries the weight). Otherwise write the inferred draft.
+  const betraysNothing =
+    !inputs.name &&
+    !inputs.description &&
+    !inputs.readmeFirstPara &&
+    Object.keys(inputs.scripts).length === 0 &&
+    !inputs.isNext;
+  if (betraysNothing) {
+    writeFileSync(briefPath, BRIEF_SEED, "utf8");
+    return { created: true, gaps: EMPTY_REPO_GAPS };
+  }
+  const { module, gaps } = inferBriefDraft(inputs);
+  writeFileSync(briefPath, module, "utf8");
+  return { created: true, gaps };
+}
 
 function onPath(bin: string): boolean {
   return spawnSync("which", [bin], { encoding: "utf8" }).status === 0;
@@ -151,6 +452,10 @@ export interface InitResult {
    *  added = wrote enabledPlugins; already = was on; skipped = --no-enable-plugin;
    *  malformed = settings.json unparseable, left untouched. */
   pluginEnabled: "added" | "already" | "skipped" | "malformed";
+  /** Whether init drafted .thebashway/brief.ts (false on an idempotent re-run — already present). */
+  briefCreated: boolean;
+  /** The un-inferred brief sections the interview must fill (empty on an idempotent re-run). */
+  briefGaps: string[];
 }
 
 export async function runInit(
@@ -172,6 +477,11 @@ export async function runInit(
   if (!existsSync(lessons)) writeFileSync(lessons, LESSONS_SEED, "utf8");
   const decisions = join(storeDir, "decisions.md");
   if (!existsSync(decisions)) writeFileSync(decisions, DECISIONS_SEED, "utf8");
+
+  // The north-star seed (INV-A: this is the only init writer of brief.ts). Inference I/O is
+  // gathered ONLY behind seedBriefIfAbsent's !existsSync check, so an idempotent re-run does none.
+  const briefPath = join(storeDir, "brief.ts");
+  const brief = seedBriefIfAbsent(dir, briefPath);
 
   // Per-project plugin activation (default on): turn the method ON for THIS repo only, by merging
   // enabledPlugins into its project-scope .claude/settings.json. Merge-safe; --no-enable-plugin
@@ -202,6 +512,8 @@ export async function runInit(
     prereqs: { claude: onPath("claude"), git, cleanTree },
     settingsPath,
     pluginEnabled,
+    briefCreated: brief.created,
+    briefGaps: brief.gaps,
   };
 }
 
@@ -212,6 +524,7 @@ export function initMessage(r: InitResult): string {
   lines.push(`Detected: ${r.detect.runner}${r.detect.isNext ? " + Next.js" : ""}, chain = [${r.detect.chain.map((c) => c.name).join(", ") || "none — edit the config"}]`);
   if (r.pluginEnabled === "added") lines.push(`Enabled the thebashway plugin for this repo (${r.settingsPath}).`);
   else if (r.pluginEnabled === "malformed") lines.push(`! Couldn't parse ${r.settingsPath} — left it untouched. Enable manually: set enabledPlugins["${PLUGIN_ID}"] = true.`);
+  if (r.briefCreated) lines.push(`Drafted .thebashway/brief.ts from the repo (${r.briefGaps.length} sections to confirm). Run \`thebashway brief\`, then have the agent walk you through it.`);
   if (!r.prereqs.claude) lines.push(`! The \`claude\` command is not on your PATH — install it before running build/fix.`);
   if (!r.prereqs.git) lines.push(`! This folder is not a git repo — run \`git init\` first.`);
   if (r.prereqs.claude && r.prereqs.git) {

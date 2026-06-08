@@ -3,12 +3,19 @@ export interface RunResult {
   code: number;
   stdout: string;
   stderr: string;
+  /**
+   * Set true when the run was KILLED for exceeding its `timeoutMs`. A timeout is a
+   * FAILURE, never a pass — `evaluateCheckSpec` treats a timed-out command as fail
+   * regardless of the resulting exit code. Optional/back-compat: existing runners and
+   * fakes omit it (undefined === not-timed-out).
+   */
+  timedOut?: boolean;
 }
 
 /** Injectable process runner — real impl shells out; tests pass a fake. */
 export type Runner = (
   cmd: string[],
-  opts?: { cwd?: string; env?: Record<string, string> },
+  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number },
 ) => Promise<RunResult>;
 
 export interface Check {

@@ -22,7 +22,8 @@ import { setBinding } from "./engine/config";
 import { noopSinks, type Notify } from "./sinks";
 import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
-import { runInit, initMessage } from "./init";
+import { runInit, initMessage, seedBriefIfAbsent } from "./init";
+import { loadBrief } from "./engine/load-brief";
 import { checkSync, readSyncRef } from "./check-sync";
 import { runUpdate, type Runner } from "./update";
 import { spawnSync } from "node:child_process";
@@ -30,7 +31,13 @@ import { resolveTarget, effectiveQueueStatus } from "./engine/audit";
 import { drain, defaultDrainDeps, type DrainDeps } from "./engine/drain";
 import { runAudit, defaultAuditDeps } from "./engine/audit-run";
 import { runFeatureDesign, defaultDesignDeps } from "./engine/design-run";
-import { gitHead } from "./engine/verify/run";
+import { gitHead, bunRun } from "./engine/verify/run";
+import { runToGoal, type RunToGoalDeps } from "./engine/autonomous";
+import { evaluateCheckSpec } from "./engine/brief-eval";
+import { emitPark } from "./engine/park";
+import { appendReflection } from "./engine/digest";
+import { runReflect } from "./engine/reflect";
+import { SURFACES } from "./engine/config";
 
 // ---------------------------------------------------------------------------
 // Binding loading + path derivation (pure-ish, unit-tested)
@@ -42,6 +49,7 @@ export interface DerivedPaths {
   runLogPath: string;
   lessonsPath: string;
   decisionsPath: string;
+  briefPath: string;
   globalLessons: string | null;
 }
 
@@ -54,6 +62,7 @@ export function derivePaths(binding: ProjectBinding): DerivedPaths {
     runLogPath: join(root, ".thebashway", "run-log.md"),
     lessonsPath: rel(binding.learning.local),
     decisionsPath: rel(binding.learning.decisions),
+    briefPath: rel(binding.learning.brief ?? ".thebashway/brief.ts"),
     globalLessons: binding.learning.global ?? null,
   };
 }
@@ -139,6 +148,37 @@ async function cmdAuditPlan(cwd: string, target: string, configPath?: string): P
   return 0;
 }
 
+/**
+ * BRIEF: the non-interactive companion to the conversational interview (which lives in SKILL.md,
+ * not here — every CLI command is cmd(cwd,args):Promise<number> with no stdin/readline). It
+ * (re)seeds the draft if missing and prints the draft path + the gap list the agent should walk
+ * through. It never silently auto-authors a confirmed brief.
+ */
+async function cmdBrief(cwd: string, _args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const briefPath = lb.paths.briefPath;
+  const seeded = seedBriefIfAbsent(lb.paths.repoRoot, briefPath);
+  if (seeded.created) {
+    console.log(`Drafted ${briefPath} from the repo.`);
+  } else {
+    console.log(`Brief: ${briefPath}`);
+  }
+  const loaded = await loadBrief(briefPath);
+  // Prefer the gaps the seed just recorded; otherwise the gaps the loaded brief carries.
+  const gaps = seeded.created ? seeded.gaps : loaded.brief?.gaps ?? [];
+  if (loaded.status === "unparseable") {
+    console.log(`! Brief exists but does not parse (${loaded.errors.join("; ")}). Fix it before the interview.`);
+  }
+  if (gaps.length) {
+    console.log(`\nGaps to confirm (${gaps.length}) — have the agent walk you through these:`);
+    for (const g of gaps) console.log(`  - ${g}`);
+  } else if (loaded.status === "ok") {
+    console.log("\nNo open gaps recorded.");
+  }
+  console.log("\nNext: ask the agent to run the brief interview (it maps your plain answers to the schema).");
+  return 0;
+}
+
 /** Build the DrainDeps for a surface from the loaded binding. */
 function drainDepsFor(lb: LoadedBinding, surface: string, baseRef: string, notify: Notify): DrainDeps {
   return defaultDrainDeps({
@@ -170,6 +210,8 @@ async function cmdFix(cwd: string, args: string[], configPath?: string): Promise
     decisionsPath: lb.paths.decisionsPath,
     surface: plan.surface,
     auditKind: designMode ? "design" : "correctness",
+    briefPath: lb.paths.briefPath,
+    notify: notifyOf(lb.binding),
   });
   const audit = await runAudit(
     { target, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun },
@@ -224,10 +266,11 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
     notify: notifyOf(lb.binding),
     runDrainStaged,
     landIntegration,
+    briefPath: lb.paths.briefPath,
   });
 
   const report = await runFeatureDesign(
-    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun, noDrain, noLand },
+    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, briefPath: lb.paths.briefPath, dryRun, noDrain, noLand },
     deps,
   );
   if (report.aborted) {
@@ -237,6 +280,194 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   if (report.design) console.log(`build "${report.design.title}" → ${report.surface}: ${report.design.summary}`);
   for (const t of report.tasks) console.log(`  - ${t.title} [${effectiveQueueStatus(t, { freezeAuthorized: true })}]`);
   console.log(report.summary);
+  return 0;
+}
+
+/** The shared human-gate park closure: emitPark across queue.md + NOW.md + the optional external
+ *  sink. Reused by run-to-goal AND the milestone reflection — there is ONE park path, never a
+ *  brief writer (INV-A). */
+function emitParkFor(lb: LoadedBinding): (title: string, reason: string) => Promise<void> {
+  const nowPath = join(lb.paths.repoRoot, ".thebashway", "NOW.md");
+  const eventSink = lb.binding.sinks?.eventSink;
+  return async (title, reason) => {
+    await emitPark(title, reason, {
+      queuePath: lb.paths.queuePath,
+      nowPath,
+      emitExternal: eventSink
+        ? async (e, kind) => {
+            await eventSink({ action: kind, target: e.item, reason: e.reason, cascade: e.cascade });
+          }
+        : undefined,
+    });
+  };
+}
+
+/**
+ * MILESTONE REFLECTION (Loop C — spec 5.5). The proposedUpdate path (incl. conventions/glossary
+ * growth) fires ONLY on an EXPLICIT milestone marker, is RATE-LIMITED (no new proposal while one is
+ * parked), and BATCHES growth into the single proposal. It routes via emitPark/sinks + appendReflection
+ * — there is NO writeFileSync(briefPath) (INV-A): the engine cannot write the brief; a human acts on
+ * the parked proposal before any human-present writer touches brief.ts.
+ */
+async function runMilestoneReflection(
+  lb: LoadedBinding,
+  opts: {
+    milestone: string;
+    learned: string[];
+    briefStillValid: boolean;
+    onPath: boolean;
+    driftedCriteria?: string[];
+    isMilestone: boolean;
+    proposedUpdate?: string;
+    proposedConventions?: string[];
+    proposedGlossary?: { term: string; means: string }[];
+  },
+): Promise<void> {
+  const park = emitParkFor(lb);
+  const res = await runReflect(
+    {
+      ...opts,
+      logPath: lb.paths.runLogPath,
+      queuePath: lb.paths.queuePath,
+    },
+    {
+      appendReflection,
+      emitPark: park,
+      readQueue: async (queuePath) => {
+        const f = Bun.file(queuePath);
+        return (await f.exists()) ? await f.text() : "";
+      },
+    },
+  );
+  console.log(
+    res.parked
+      ? `reflect "${opts.milestone}": brief-update proposal PARKED for your review (human-gated; not written).`
+      : `reflect "${opts.milestone}": logged${res.suppressedReason ? ` (no park: ${res.suppressedReason})` : ""}.`,
+  );
+}
+
+/**
+ * AUTONOMOUS-TO-GOAL (spec 5.4): re-invoke the drain until the brief's target slice (or the whole
+ * required set) is met, under REQUIRED caps. `--target <id,…>` aims at a slice (PART); omitted =
+ * all required ids (ALL). `--milestone <label>` marks this run as an epic-completion milestone so a
+ * successful terminal fires the Loop-C reflection (a brief-update proposal routes via emitPark/sinks
+ * — NEVER an auto `git push origin main`, memory main-branch-classifier-gate).
+ */
+async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  tlsGuard();
+
+  const tIdx = args.indexOf("--target");
+  const targetCriteria =
+    tIdx >= 0 && args[tIdx + 1]
+      ? args[tIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+  const mIdx = args.indexOf("--milestone");
+  const milestone = mIdx >= 0 ? args[mIdx + 1] : undefined;
+  const surface = lb.binding.defaultSurface;
+  const baseRef = await gitHead(lb.paths.repoRoot);
+  const notify = notifyOf(lb.binding);
+
+  // The EvalCtx the termination ORACLE runs criteria under (surface chain for `verify` checks).
+  const sc = SURFACES[surface];
+  const evalSurface = sc ? { dir: resolve(lb.paths.repoRoot, sc.dir), env: sc.env, chain: sc.chain } : undefined;
+
+  const deps: RunToGoalDeps = {
+    loadBrief,
+    evaluateCheckSpec,
+    evalCtx: { repoRoot: lb.paths.repoRoot, run: bunRun, surface: evalSurface },
+    runDrain: (o) => drain(o, drainDepsFor(lb, o.surface, baseRef, notify)),
+    runAudit: (o) =>
+      runAudit(
+        o,
+        defaultAuditDeps({
+          repoRoot: lb.paths.repoRoot,
+          decisionsPath: lb.paths.decisionsPath,
+          surface,
+          briefPath: lb.paths.briefPath,
+          notify,
+        }),
+      ),
+    notify: (text) => notify(text).then(() => true),
+    emitPark: emitParkFor(lb),
+    now: Date.now,
+  };
+
+  const result = await runToGoal(
+    {
+      surface,
+      queuePath: lb.paths.queuePath,
+      repoRoot: lb.paths.repoRoot,
+      briefPath: lb.paths.briefPath,
+      targetCriteria,
+      // REQUIRED caps (memory bashir-cost-sensitive): three independent axes. maxIterations
+      // (default 5, in runToGoal) bounds drain passes; maxWallClockMs is the time backstop;
+      // costCeiling bounds the cumulative BUILD BASHAS spawned (the real LLM-spend driver) — a
+      // distinct axis that can bite before 5 iterations when drains are productive.
+      maxWallClockMs: 60 * 60_000,
+      costCeiling: 12,
+    },
+    deps,
+  );
+
+  console.log(
+    `run-to-goal: ${result.reason} (goalMet=${result.goalMet}, built ${result.built} in ${result.iterations} iter; target [${result.target.join(", ") || "—"}])`,
+  );
+  if (result.failingRequired.length) {
+    console.log(`  still-failing required: ${result.failingRequired.join(", ")}`);
+  }
+
+  // Loop C (spec 5.5): the EXPLICIT milestone marker fires the reflection. A successful terminal is
+  // the epic-completion signal; the per-feature lands inside drain do NOT propose (lightweight only).
+  // The reflection logs the note and — rate-limited/batched — parks a brief-update proposal. Without
+  // --milestone, run-to-goal never proposes a brief change (no propose-after-every-feature drip).
+  if (milestone) {
+    await runMilestoneReflection(lb, {
+      milestone,
+      learned: [`run-to-goal terminal: ${result.reason}`, `built ${result.built} item(s) in ${result.iterations} iteration(s)`],
+      briefStillValid: true,
+      onPath: result.failingRequired.length === 0,
+      driftedCriteria: result.failingRequired.length ? result.failingRequired : undefined,
+      isMilestone: true,
+    });
+  }
+
+  return result.goalMet ? 0 : 1;
+}
+
+/**
+ * REFLECT (Loop C — spec 5.5): the explicit milestone marker. `--milestone <label>` (or `--epic`)
+ * marks an epic-completion milestone — the ONLY trigger for a brief-update proposal; without it the
+ * reflection logs a LIGHTWEIGHT per-feature note and NEVER parks a proposal. `--learned "<note>"`
+ * (repeatable), `--propose "<delta>"` stage a batched proposal. The proposal routes via emitPark/sinks
+ * + the run log — NEVER writeFileSync(briefPath) (INV-A): a human acts on the parked proposal before
+ * any human-present writer touches brief.ts.
+ */
+async function cmdReflect(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const flagVal = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const flagVals = (flag: string): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i++) if (args[i] === flag && args[i + 1]) out.push(args[i + 1]);
+    return out;
+  };
+  const milestone = flagVal("--milestone") ?? flagVal("--epic");
+  const isMilestone = args.includes("--milestone") || args.includes("--epic");
+  const learned = flagVals("--learned");
+  const proposedUpdate = flagVal("--propose");
+  const label = milestone ?? "feature land";
+
+  await runMilestoneReflection(lb, {
+    milestone: label,
+    learned,
+    briefStillValid: true,
+    onPath: true,
+    isMilestone,
+    proposedUpdate,
+  });
   return 0;
 }
 
@@ -252,6 +483,15 @@ function usage(): void {
   thebashway build "<feature>" [--dry-run] [--no-drain]
                                          BUILD: design a new feature, then build it
   thebashway "<request>"                 auto-route to build or fix
+  thebashway brief                       (re)seed + print the per-project north star draft + its gaps
+  thebashway run-to-goal [--target <id,…>] [--milestone <label>]
+                                         AUTONOMOUS: re-drain until the brief's target (a slice via
+                                         --target, or all required criteria) is met, under caps;
+                                         --milestone fires the Loop-C reflection on a successful run
+  thebashway reflect --milestone <label> [--learned "<note>"…] [--propose "<delta>"]
+                                         LOOP C: log a milestone reflection; --milestone/--epic is the
+                                         ONLY trigger that stages a human-gated brief-update proposal
+                                         (rate-limited, batched); never writes the brief
   thebashway audit-plan <target>         print the resolved plan (no model calls)
   thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
   thebashway check-sync                  report drift vs the lifeofbash engine
@@ -279,6 +519,12 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return cmdUpdate();
     case "audit-plan":
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
+    case "brief":
+      return cmdBrief(cwd, args, configPath);
+    case "run-to-goal":
+      return cmdRunToGoal(cwd, args, configPath);
+    case "reflect":
+      return cmdReflect(cwd, args, configPath);
     case "fix":
       return cmdFix(cwd, args, configPath);
     case "build":
