@@ -1,7 +1,7 @@
 {
   "name": "thebashway",
-  "version": "0.3.1",
-  "description": "Autonomous Build + Fix for any repo — Claude builds/fixes code behind evidence-backed gates with human-approval rails. This plugin is the METHOD (skill + slash commands); install the Bun engine separately (see the repo README).",
+  "version": "0.3.2",
+  "description": "Autonomous Build + Fix for any repo — Claude builds/fixes code behind evidence-backed gates with human-approval rails, either headless (thebashway build/fix/run-to-goal) or via interactive in-session basha orchestration. This plugin is the METHOD (skill + slash commands); install the Bun engine separately (see the repo README).",
   "author": {
     "name": "Bashir Abi Habib"
   },
