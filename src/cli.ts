@@ -18,9 +18,9 @@
 import { resolve, join, isAbsolute } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { setBinding } from "./engine/config";
+import { setBinding, getRequireBrief } from "./engine/config";
 import { gapsOf } from "./engine/brief";
-import { writeConfirmedBrief, parseBriefWritePayload } from "./brief-writer";
+import { writeConfirmedBrief, parseBriefWritePayload, briefGateDecision } from "./brief-writer";
 import { noopSinks, type Notify } from "./sinks";
 import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
@@ -207,6 +207,20 @@ async function cmdBriefWrite(cwd: string, args: string[], configPath?: string): 
   return 0;
 }
 
+/** Brief-first gate: load the brief and decide whether a work command may run. */
+async function briefGate(lb: LoadedBinding, args: string[]): Promise<{ pass: boolean; message?: string }> {
+  const skipBrief = args.includes("--skip-brief");
+  const loaded = await loadBrief(lb.paths.briefPath);
+  const readiness = loaded.status === "ok" && loaded.brief ? gapsOf(loaded.brief) : undefined;
+  return briefGateDecision({
+    status: loaded.status,
+    confirmed: loaded.brief?.confirmed ?? false,
+    readiness,
+    requireBrief: getRequireBrief(),
+    skipBrief,
+  });
+}
+
 /** Build the DrainDeps for a surface from the loaded binding. */
 function drainDepsFor(lb: LoadedBinding, surface: string, baseRef: string, notify: Notify): DrainDeps {
   return defaultDrainDeps({
@@ -227,6 +241,8 @@ async function cmdFix(cwd: string, args: string[], configPath?: string): Promise
   const designMode = args.includes("--design");
   const land = !args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const plan = resolveTarget(target);
@@ -276,6 +292,8 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   const noDrain = args.includes("--no-drain");
   const noLand = args.includes("--no-land");
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const baseRef = await gitHead(lb.paths.repoRoot);
@@ -383,6 +401,8 @@ async function runMilestoneReflection(
  */
 async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): Promise<number> {
   const lb = await loadBinding({ cwd, configPath });
+  const gate = await briefGate(lb, args);
+  if (!gate.pass) { console.error(gate.message); return 1; }
   tlsGuard();
 
   const tIdx = args.indexOf("--target");

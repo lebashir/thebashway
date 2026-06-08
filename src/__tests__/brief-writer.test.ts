@@ -80,3 +80,31 @@ test("parseBriefWritePayload ALLOWS confirmed:true with the deferred success pla
   }));
   expect(r.ok).toBe(true);
 });
+
+import { briefGateDecision } from "../brief-writer";
+
+test("gate passes when requireBrief is off, or skipped, or confirmed", () => {
+  expect(briefGateDecision({ status: "absent", confirmed: false, requireBrief: false, skipBrief: false }).pass).toBe(true);
+  expect(briefGateDecision({ status: "absent", confirmed: false, requireBrief: true, skipBrief: true }).pass).toBe(true);
+  expect(briefGateDecision({ status: "ok", confirmed: true, requireBrief: true, skipBrief: false }).pass).toBe(true);
+});
+
+test("gate stops with a guided message when no confirmed brief", () => {
+  const absent = briefGateDecision({ status: "absent", confirmed: false, requireBrief: true, skipBrief: false });
+  expect(absent.pass).toBe(false);
+  expect(absent.message).toMatch(/north star isn.t set up/i);
+
+  const draft = briefGateDecision({
+    status: "ok", confirmed: false, requireBrief: true, skipBrief: false,
+    readiness: { gaps: ["scope", "success check"], coreComplete: false, autonomousReady: false, confirmed: false },
+  });
+  expect(draft.pass).toBe(false);
+  expect(draft.message).toMatch(/in progress/i);
+  expect(draft.message).toMatch(/scope/);
+});
+
+test("gate surfaces the unparseable loud signal", () => {
+  const r = briefGateDecision({ status: "unparseable", confirmed: false, requireBrief: true, skipBrief: false });
+  expect(r.pass).toBe(false);
+  expect(r.message).toMatch(/does not parse/i);
+});

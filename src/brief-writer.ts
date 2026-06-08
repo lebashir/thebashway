@@ -3,7 +3,7 @@
 // sanctioned writers (the first is init.ts's seedBriefIfAbsent). The engine's brief.ts exports
 // no writer; this is the only non-init writeFileSync(briefPath) in the codebase.
 import { writeFileSync } from "node:fs";
-import { gapsOf, DesignBriefSchema, type DesignBrief } from "./engine/brief";
+import { gapsOf, DesignBriefSchema, type DesignBrief, type BriefReadiness } from "./engine/brief";
 import { briefModule } from "./init";
 
 /** Pure render of a confirmed DesignBrief to a clean, re-readable brief.ts module. */
@@ -45,4 +45,27 @@ export function parseBriefWritePayload(raw: string): BriefWriteParse {
     }
   }
   return { ok: true, brief };
+}
+
+/** Pure brief-first gate decision. Given the brief's load status + readiness, decide whether a work
+ * command may run, and the guided message to print otherwise. `requireBrief:false` or `--skip-brief`
+ * always pass; a confirmed parseable brief passes; everything else stops with a plain-language nudge. */
+export function briefGateDecision(opts: {
+  status: "ok" | "absent" | "unparseable";
+  confirmed: boolean;
+  readiness?: BriefReadiness;
+  requireBrief: boolean;
+  skipBrief: boolean;
+}): { pass: boolean; message?: string } {
+  if (!opts.requireBrief || opts.skipBrief) return { pass: true };
+  if (opts.status === "ok" && opts.confirmed) return { pass: true };
+  if (opts.status === "unparseable") {
+    return { pass: false, message: "Your north star file exists but does not parse — fix it before continuing (or pass --skip-brief)." };
+  }
+  if (opts.status === "ok" && !opts.confirmed) {
+    const gaps = opts.readiness?.gaps ?? [];
+    const left = gaps.length ? ` (still to do: ${gaps.join(", ")})` : "";
+    return { pass: false, message: `Your north star is in progress${left}. Finish it first: thebashway brief. (Or pass --skip-brief.)` };
+  }
+  return { pass: false, message: "Your north star isn't set up yet — let's do that first: thebashway brief. (Or pass --skip-brief / set requireBrief:false.)" };
 }
