@@ -55,6 +55,14 @@ after `thebashway init`. It is non-technical, progressive, and infer-first, in t
 rings. The owner answers in plain language; YOU map the answers to the schema behind the scenes
 (they never see `inScopeSurfaces` or `CheckSpec`).
 
+**The gate funnel.** After `init`, `thebashway build`/`fix`/`run-to-goal` are GATED — they refuse to
+run until the north star is confirmed and instead print a one-line nudge back to `thebashway brief`.
+So when the owner finishes `init` (or hits the gate), lead them straight into this interview rather
+than letting them stall. (A repo can opt out with `requireBrief:false`, and any single run can
+bypass with `--skip-brief`, but the default path is: interview → confirm → build.) READ BACK every
+mapped answer before writing — you translate plain language into schema, so confirm you captured it
+right before it lands in the brief.
+
 - **Ring 1 — the five always-asked core questions** (each maps to schema fields):
   - "In a sentence — what is this for?" → `purpose` (+ `narrative`)
   - "Who is this for?" → `whoServed`
@@ -63,12 +71,17 @@ rings. The owner answers in plain language; YOU map the answers to the schema be
   - "What is explicitly NOT this project — what should it never turn into?" → `limits`,
     `forbiddenSurfaces`, `forbiddenTerritory`
   - "How would YOU check it's working — what would you look at, click, or see?" → `successCriteria`.
-    Stay in plain language; do NOT ask for a shell command. Then TRANSLATE the answer into a
-    candidate `command` CheckSpec and read it back to confirm ("so I'll check that by running
-    `<cmd>` — does that capture it?"). When no command is derivable, route the goal to `milestones`
-    (human-judged) and leave the `command` placeholder as an explicit `# GAP` a developer fills
-    later. An unfilled placeholder is an EXPECTED, non-blocking cold-start state — the brief still
-    loads and guides; only autonomous-to-goal stays disabled until it is filled. Never dead-end here.
+    Stay in plain language; NEVER ask the owner for a shell command. TRANSLATE the obvious, DEFER
+    the rest:
+    - When the answer maps cleanly to something the repo already runs — "tests pass" → the verify
+      chain / `bun test`, "the build is green" → the build command — capture it as a `command` (or
+      `verify`) CheckSpec and READ IT BACK to confirm ("so I'll check that by running `<cmd>` —
+      does that capture it?").
+    - Otherwise capture the plain goal as a `milestone` (human-judged) and leave the
+      `echo REPLACE-ME && exit 1` `command` placeholder in place. Tell the owner filling it later is
+      an OPTIONAL "make-it-autonomous-ready" step, never a blocker — the brief still loads, guides,
+      and confirms with the placeholder present; only hands-off autonomous-to-goal stays disabled
+      until a developer fills it. Never dead-end, and never push the owner to write a command.
 - **Ring 2 — inferred-and-confirmed conventions & glossary.** Do NOT ask these cold. PRESENT the
   inferred draft ("I see you use `<runner>`, tests run with `<test cmd>`; I wrote that down as
   how-we-work — anything to add or correct?" and "Here are the terms I picked up: `<term>` — what
@@ -78,14 +91,20 @@ rings. The owner answers in plain language; YOU map the answers to the schema be
   human-gated park/sink path, never auto-written, fired only on an explicit milestone marker,
   batched into one proposal, and rate-limited while a proposal is already parked.
 
-On confirmation, the agreed brief is written by a HUMAN-PRESENT writer — the second of the two the
-brief is allowed (the first being init's `seedBriefIfAbsent`). That writer (`writeConfirmedBrief`,
-the brief-command interview write) is the only thing that flips `confirmed:true`; until it ships,
-confirming is a human-present edit of `brief.ts` (flipping `confirmed:true` by hand is itself a
-spec-sanctioned human-present path). The engine itself exports NO brief writer (INV-A), so this is
-always a human-gated write, never an engine auto-write. While `confirmed:false`, the brief still
-injects as advisory context but never hardens into drift teeth and never lets autonomous mode
-terminate on the goal.
+On confirmation, do NOT hand-edit `brief.ts`. Call `thebashway brief write --from <file>` with the
+agreed fields as JSON (`confirmed: true`) — it validates at the boundary and writes the brief
+through `writeConfirmedBrief`, the second of the two writers the brief is allowed (the first being
+init's `seedBriefIfAbsent`). Write the JSON to a temp file and point `--from` at it. The command
+recomputes the gap list canonically, refuses a premature confirm (it rejects `confirmed:true` while
+any Ring-1 core field is still empty), and prints what remains. The engine itself exports NO brief
+writer (INV-A), so this is always a human-gated write, never an engine auto-write. While
+`confirmed:false`, the brief still injects as advisory context but never hardens into drift teeth
+and never lets autonomous mode terminate on the goal.
+
+**Save as you go (resumable).** After each ring — or any time the owner pauses — call
+`thebashway brief write --from <file>` with the fields gathered so far and `confirmed: false`. That
+persists a partial draft so nothing is lost. On resume, run `thebashway brief` to see the remaining
+gaps, then ask ONLY those — never re-ask what's already filled.
 
 ## Operating rules for an agent
 
