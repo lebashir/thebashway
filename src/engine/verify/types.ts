@@ -1,4 +1,6 @@
-// tools/orchestrator/verify/types.ts
+// src/engine/verify/types.ts
+import type { RequiredTouch } from "../../binding";
+
 export interface RunResult {
   code: number;
   stdout: string;
@@ -47,6 +49,9 @@ export interface SurfaceConfig {
   needsRealInstall?: boolean;
   /** Build but do NOT auto-deploy on land — stage for human review (e.g. a view a smoke can't exercise). */
   stageNotDeploy?: boolean;
+  /** Mechanical "touched too little" completeness rules for this surface (from binding.surfaces[*].requiredTouches).
+   *  The verify gate reads these (glob-gated, so cross-surface rules are harmless). Default none. */
+  requiredTouches?: RequiredTouch[];
 }
 
 export interface CheckResult {

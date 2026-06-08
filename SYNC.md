@@ -1,29 +1,31 @@
 # How this package relates to lifeofbash
 
-This package's engine (`src/engine/`) was **extracted from**
-`lifeofbash/tools/orchestrator` and then **generalized** — the lifeofbash-specific
-config was lifted out into a `ProjectBinding` (`src/binding.ts`), so the files here
-intentionally differ from the originals. lifeofbash still runs its own copy.
+This package's engine (`src/engine/`) was **extracted from** `lifeofbash/tools/orchestrator`
+and then **generalized** behind an injected `ProjectBinding` (`src/binding.ts`). As of
+**2026-06-08, lifeofbash CONSUMES this package** — its `tools/orchestrator/` shrank to a binding
+(`thebashway.config.ts`) plus its data/learning stores, and the engine, CLI, verify gate, granular
+driver verbs, and build-method skill all come from here (linked with `bun link`).
 
-## The drift risk
+## One copy, no drift
 
-Because there are now two copies, lifeofbash's engine can move ahead (a bug fix, a new
-capability) and this package can fall behind — that is exactly how the *previous*
-extraction went stale. v1 does not auto-sync; it makes drift **visible**:
+The old two-copy drift risk is gone, so the `check-sync` command and `.sync-ref` tracker have been
+**removed**. A bug fix or new capability lands HERE once and every consumer gets it via
+`thebashway update` (or, for a `bun link`ed dev setup like lifeofbash's, immediately — the consumer
+points at this working tree).
+
+This is the "permanent fix" the original extraction deferred. See the consume-package spec in the
+lifeofbash repo (`docs/superpowers/specs/2026-06-08-thebashway-consume-package.md`).
+
+## Becoming a consumer
+
+A repo consumes the package by linking the engine and supplying one binding:
 
 ```
-bun run check-sync
+git clone https://github.com/lebashir/thebashway ~/thebashway
+cd ~/thebashway && bun install && bun link
+cd <your repo> && bun link thebashway      # then: thebashway init (or hand-author the config)
 ```
 
-`.sync-ref` records the lifeofbash commit this package was last reconciled to.
-`check-sync` lists the commits that have touched `tools/orchestrator` in lifeofbash
-since then — i.e. the changes that may need porting here. When you reconcile, update
-`.sync-ref` to the new lifeofbash HEAD.
-
-## The permanent fix (next spec, not v1)
-
-Make lifeofbash a **consumer** of this package: its `tools/orchestrator` shrinks to a
-binding (`thebashway.config.ts`) + a thin CLI wrapper, importing the engine from here.
-One copy, no drift. That refactor is deliberately deferred so v1 stays a clean, low-risk
-extraction — see `docs/superpowers/specs/2026-06-05-thebashway-portable-build-fix-design.md`
-§9 in the lifeofbash repo.
+A `thebashway.config.ts` (see `examples/`) declares the repo's surfaces, rails, learning stores,
+sinks, design bar, and loop-data `paths`. The CLI loads it from the cwd, or via `--config <path>`
+(lifeofbash invokes `thebashway --config orchestrator/thebashway.config.ts`).

@@ -107,6 +107,18 @@ export interface SinkBinding {
   statusFile?: StatusFile;
 }
 
+/** Override the default `.thebashway/*` loop-data locations for a repo that keeps them elsewhere
+ *  (e.g. lifeofbash keeps queue/run-log under tools/orchestrator/ and NOW.md at the repo root).
+ *  Paths are repoRoot-relative (or absolute). Each falls back to its `.thebashway/` default. */
+export interface PathsBinding {
+  queue?: string;
+  runLog?: string;
+  /** The always-on attention surface the park-and-continue flow refreshes. Default `.thebashway/NOW.md`. */
+  now?: string;
+  /** Where the verify gate writes its manifest. Default `.thebashway/.verify-manifest.json`. */
+  manifest?: string;
+}
+
 export interface ProjectBinding {
   /** Absolute path to the repo root. `init` fills this in. */
   repoRoot: string;
@@ -122,6 +134,11 @@ export interface ProjectBinding {
   maxConcurrent?: number;
   branchPattern?: string;
   seedPaths?: string[];
+  /** Project design-system bar injected into UI build/design-audit prompts. Overrides the generic
+   *  default (a repo with its own design system supplies it here so build bashas extend it). */
+  designBar?: string;
+  /** Override the default `.thebashway/*` loop-data locations (queue/run-log/NOW.md/manifest). */
+  paths?: PathsBinding;
 }
 
 /** Filled-in binding: optional fields resolved to their defaults. */

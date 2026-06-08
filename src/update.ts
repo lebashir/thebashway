@@ -7,7 +7,7 @@
 // `claude plugin update thebashway` instead.)
 //
 // Side effects (git/bun) go through an INJECTED `run` seam so the decision logic is unit-tested
-// without touching the network or the filesystem (mirrors check-sync.ts's injected gitLog).
+// without touching the network or the filesystem.
 
 export interface RunResult {
   status: number;

@@ -3,7 +3,8 @@
 // out and keeps everything else. See the spec's "Portability" section.
 import { resolve } from "node:path";
 import type { SurfaceConfig } from "./verify/types";
-import type { ResolvedBinding } from "./binding";
+import type { ResolvedBinding } from "../binding";
+import { REQUIRED_TOUCHES } from "./required-touches";
 
 /**
  * Run-mode budget: the maximum number of in-flight *build* bashas (heavy — each
@@ -202,6 +203,10 @@ export const SURFACES: Record<string, SurfaceConfig> = {
     },
     needsRealInstall: true,
     stageNotDeploy: true,
+    // The "touched too little" completeness rules for this surface (read by the verify gate). Kept
+    // here so the default (un-setBinding) engine behaves like lifeofbash; a consumer's binding
+    // supplies its own per-surface requiredTouches, which setBinding swaps in.
+    requiredTouches: REQUIRED_TOUCHES,
   },
   tools: {
     dir: "tools",
@@ -251,6 +256,7 @@ let _repoRoot = resolve(import.meta.dir, "..", "..");
 let _briefPath = ".thebashway/brief.ts";
 let _briefSensitivity: "off" | "low" | "medium" | "high" = "medium";
 let _requireBrief = true;
+let _designBar: string | null = null;
 
 /** The binding's defaultSurface — where ambiguous work and unknown paths land. */
 export function getDefaultSurface(): string {
@@ -277,6 +283,12 @@ export function getRequireBrief(): boolean {
   return _requireBrief;
 }
 
+/** The project's design-system bar text (binding.designBar), or null to use the engine's generic
+ *  DESIGN_BAR. Read by basha-prompt + the design-audit finder so a repo's own design system wins. */
+export function getDesignBar(): string | null {
+  return _designBar;
+}
+
 /** Override the project-specific binding values in place. Called once by the CLI at startup. */
 export function setBinding(b: ResolvedBinding): void {
   _defaultSurface = b.defaultSurface;
@@ -285,6 +297,7 @@ export function setBinding(b: ResolvedBinding): void {
   _briefPath = b.learning.brief ?? ".thebashway/brief.ts";
   _briefSensitivity = b.rails.briefDriftSensitivity ?? "medium";
   _requireBrief = b.rails.requireBrief ?? true;
+  _designBar = b.designBar ?? null;
   _replaceRecord(SURFACES, b.surfaces as unknown as Record<string, SurfaceConfig>);
   _replaceRecord(AUDIT_TARGETS, (b.auditTargets ?? {}) as typeof AUDIT_TARGETS);
   Object.assign(SWEEP, b.sweep ?? _DEFAULTS.sweep);
@@ -299,6 +312,7 @@ export function resetBinding(): void {
   _briefPath = ".thebashway/brief.ts";
   _briefSensitivity = "medium";
   _requireBrief = true;
+  _designBar = null;
   _replaceRecord(SURFACES, _DEFAULTS.surfaces);
   _replaceRecord(AUDIT_TARGETS, _DEFAULTS.auditTargets);
   Object.assign(SWEEP, _DEFAULTS.sweep);

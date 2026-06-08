@@ -116,6 +116,16 @@ export const binding = defineThebashway({
     decisions: "/Users/bachir.habib/lifeofbash/tools/orchestrator/decisions.md",
     brief: "tools/orchestrator/brief.ts",
   },
+
+  // lifeofbash keeps its loop data where it already lives, and refreshes the repo-root NOW.md.
+  paths: {
+    queue: "tools/orchestrator/queue.md",
+    runLog: "tools/orchestrator/run-log.md",
+    now: "NOW.md",
+    manifest: "tools/orchestrator/.verify-manifest.json",
+  },
+  seedPaths: ["organs/.env.local"],
+  designBar: "Glass design system: read playbooks/glass-design-system.md + organs/src/glass/ and EXTEND it; never inline-style what a primitive covers.",
 });
 
 // Convenience re-export for the injection step (Task 1.2) + any consumer that

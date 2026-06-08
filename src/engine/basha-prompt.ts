@@ -16,6 +16,7 @@ import type { Lesson as OrchestratorLesson } from "./lessons";
 import { parseLessons } from "./operating-lessons";
 import type { Lesson as OperatingLesson } from "./operating-lessons";
 import { DESIGN_BAR } from "./design-bar";
+import { getDesignBar } from "./config";
 
 // Default area filter for cross-cutting guardrails injected into every basha.
 // Does NOT include people/self/* — those are never injected into build-zone prompts.
@@ -66,7 +67,8 @@ export function buildBashaPrompt(opts: BuildBashaPromptOptions): string {
   if (taskBody) parts.push(taskBody);
 
   // The design bar rides LAST — read right before acting, and an honest no-op on backend work.
-  if (designBar) parts.push(DESIGN_BAR);
+  // A project supplies its own via binding.designBar (getDesignBar); else the generic default.
+  if (designBar) parts.push(getDesignBar() ?? DESIGN_BAR);
 
   return parts.join("\n\n");
 }
