@@ -69,3 +69,12 @@ export function briefGateDecision(opts: {
   }
   return { pass: false, message: "Your north star isn't set up yet — let's do that first: thebashway brief. (Or pass --skip-brief / set requireBrief:false.)" };
 }
+
+/** Pure status lines for `thebashway brief` — describes a brief's readiness (confirmed/draft,
+ * remaining gaps, autonomous-ready) and the next step, using gapsOf's plain-language labels. */
+export function briefStatusLines(r: BriefReadiness): string[] {
+  if (r.confirmed && r.autonomousReady) return ["North star: confirmed — you're all set."];
+  if (r.confirmed) return ["North star: confirmed (success check not set — fill it to enable hands-off autonomous-to-goal runs)."];
+  const left = r.gaps.length ? ` Still to do: ${r.gaps.join(", ")}.` : "";
+  return [`North star: draft — not confirmed yet.${left}`, "Next: run the brief interview with the agent (it asks plain questions and writes it for you)."];
+}

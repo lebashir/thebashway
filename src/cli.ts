@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { setBinding, getRequireBrief } from "./engine/config";
 import { gapsOf } from "./engine/brief";
-import { writeConfirmedBrief, parseBriefWritePayload, briefGateDecision } from "./brief-writer";
+import { writeConfirmedBrief, parseBriefWritePayload, briefGateDecision, briefStatusLines } from "./brief-writer";
 import { noopSinks, type Notify } from "./sinks";
 import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
@@ -166,18 +166,12 @@ async function cmdBrief(cwd: string, _args: string[], configPath?: string): Prom
     console.log(`Brief: ${briefPath}`);
   }
   const loaded = await loadBrief(briefPath);
-  // Prefer the gaps the seed just recorded; otherwise the gaps the loaded brief carries.
-  const gaps = seeded.created ? seeded.gaps : loaded.brief?.gaps ?? [];
   if (loaded.status === "unparseable") {
     console.log(`! Brief exists but does not parse (${loaded.errors.join("; ")}). Fix it before the interview.`);
+    return 1;
   }
-  if (gaps.length) {
-    console.log(`\nGaps to confirm (${gaps.length}) — have the agent walk you through these:`);
-    for (const g of gaps) console.log(`  - ${g}`);
-  } else if (loaded.status === "ok") {
-    console.log("\nNo open gaps recorded.");
-  }
-  console.log("\nNext: ask the agent to run the brief interview (it maps your plain answers to the schema).");
+  const readiness = loaded.brief ? gapsOf(loaded.brief) : { gaps: seeded.gaps, coreComplete: false, autonomousReady: false, confirmed: false };
+  for (const line of briefStatusLines(readiness)) console.log(line);
   return 0;
 }
 

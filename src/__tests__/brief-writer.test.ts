@@ -108,3 +108,17 @@ test("gate surfaces the unparseable loud signal", () => {
   expect(r.pass).toBe(false);
   expect(r.message).toMatch(/does not parse/i);
 });
+
+import { briefStatusLines } from "../brief-writer";
+
+test("briefStatusLines: confirmed + ready → 'you're set'", () => {
+  const lines = briefStatusLines({ gaps: [], coreComplete: true, autonomousReady: true, confirmed: true }).join("\n");
+  expect(lines).toMatch(/confirmed/i);
+  expect(lines).toMatch(/set/i);
+});
+test("briefStatusLines: draft → shows remaining gaps + the next step", () => {
+  const lines = briefStatusLines({ gaps: ["scope", "success check"], coreComplete: false, autonomousReady: false, confirmed: false }).join("\n");
+  expect(lines).toMatch(/draft/i);
+  expect(lines).toMatch(/scope/);
+  expect(lines).toMatch(/interview/i);
+});
