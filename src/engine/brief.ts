@@ -206,6 +206,31 @@ export function classifyDrift(
   return { material: false };
 }
 
+export interface BriefReadiness {
+  gaps: string[];           // plain-language labels of what's still missing
+  coreComplete: boolean;    // Ring-1 core (purpose/whoServed/scope/limits) all non-empty
+  autonomousReady: boolean; // a required command criterion exists whose run is not the REPLACE-ME placeholder
+  confirmed: boolean;       // mirrors brief.confirmed
+}
+
+const PLACEHOLDER_RUN = "echo REPLACE-ME && exit 1";
+
+/** Deterministic readiness of a brief — the single source of truth for the status command,
+ * the brief-first gate, and the writer's gap recompute. Pure (no fs/spawn). */
+export function gapsOf(brief: DesignBrief): BriefReadiness {
+  const gaps: string[] = [];
+  if (!brief.purpose.trim()) gaps.push("purpose");
+  if (!brief.whoServed.trim()) gaps.push("who it's for");
+  if (!brief.scope.trim()) gaps.push("scope");
+  if (!brief.limits.trim()) gaps.push("what's out of scope");
+  const coreComplete = gaps.length === 0;
+  const autonomousReady = brief.successCriteria.some(
+    (c) => c.required && c.check.kind === "command" && c.check.run.trim() !== PLACEHOLDER_RUN,
+  );
+  if (!autonomousReady) gaps.push("success check");
+  return { gaps, coreComplete, autonomousReady, confirmed: brief.confirmed };
+}
+
 /**
  * Looser-than-territoriesOverlap partial match used ONLY at 'high' sensitivity. An affected
  * path and a forbidden glob's static prefix that share at least one leading path SEGMENT but

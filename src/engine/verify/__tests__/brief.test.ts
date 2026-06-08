@@ -9,6 +9,7 @@ import {
   DesignBriefSchema,
   renderBriefForPrompt,
   classifyDrift,
+  gapsOf,
   type DesignBrief,
 } from "../../brief";
 import { loadBrief } from "../../load-brief";
@@ -347,4 +348,41 @@ test("classifyDrift 'high' does not fire on fully-disjoint territory", () => {
   const b = brief({ forbiddenTerritory: ["src/legacy/**"], inScopeSurfaces: [], forbiddenSurfaces: [] });
   // 'docs/**' shares NO leading segment with 'src/legacy/**'
   expect(classifyDrift({ surface: "organs", affectsTerritory: ["docs/x.md"] }, b, "high").material).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// gapsOf — the single-source-of-truth readiness reader (pure)
+// ---------------------------------------------------------------------------
+// helper: a minimal valid brief (the schema requires >=1 required command criterion)
+function gapsBrief(over: Record<string, unknown> = {}) {
+  return DesignBriefSchema.parse({
+    purpose: "p", whyNow: "", whoServed: "w", scope: "s", limits: "l",
+    successCriteria: [{ id: "c", statement: "s", check: { kind: "command", run: "bun test" }, required: true }],
+    ...over,
+  });
+}
+
+test("gapsOf: a filled confirmed brief is complete + autonomous-ready", () => {
+  const r = gapsOf(gapsBrief({ confirmed: true }));
+  expect(r.gaps).toEqual([]);
+  expect(r.coreComplete).toBe(true);
+  expect(r.autonomousReady).toBe(true);
+  expect(r.confirmed).toBe(true);
+});
+
+test("gapsOf: empty Ring-1 core fields become gaps; whyNow does NOT", () => {
+  const r = gapsOf(gapsBrief({ purpose: "", scope: "", whyNow: "" }));
+  expect(r.coreComplete).toBe(false);
+  expect(r.gaps).toContain("purpose");
+  expect(r.gaps).toContain("scope");
+  expect(r.gaps).not.toContain("why now");
+});
+
+test("gapsOf: the REPLACE-ME command placeholder => not autonomous-ready (a gap), still core-complete", () => {
+  const r = gapsOf(gapsBrief({ successCriteria: [
+    { id: "c", statement: "s", check: { kind: "command", run: "echo REPLACE-ME && exit 1" }, required: true },
+  ] }));
+  expect(r.coreComplete).toBe(true);
+  expect(r.autonomousReady).toBe(false);
+  expect(r.gaps).toContain("success check");
 });
