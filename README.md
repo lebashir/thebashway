@@ -140,6 +140,34 @@ It plans the feature, builds it on a branch, runs your tests, and shows you the 
 thebashway "the date on the receipt is off by one day"
 ```
 
+**Give your project a north star** (optional, but it makes everything above sharper):
+
+```
+thebashway brief
+```
+
+This drafts a short, plain-language statement of what your project *is* — its purpose, who
+it's for, what's in and out of scope, and how you'd know it's working — inferred from your
+repo, then confirmed in a quick back-and-forth with the agent (it maps your plain answers to
+the structure; you never write a config). Once it's there, every `fix` / `build` / `audit`
+reads it as guiding context, so the work bends toward what the project is actually for, and it
+*warns* — never blocks — when a design drifts outside the scope you declared. You only ever
+write the brief yourself; thebashway proposes changes for your review and never rewrites your
+vision to fit a request.
+
+With a north star in place, you can point thebashway at a goal and let it run:
+
+```
+thebashway run-to-goal                  # drive every required success-criterion to green
+thebashway run-to-goal --target ship    # or aim at just one slice of the goal-set
+```
+
+It loops — build, check the criteria, repeat — until the goal is met, then stops on its own.
+It's bounded by hard caps (iterations, wall-clock, and a build-spend ceiling), and it stays
+honest: it declares "done" only when the criteria *you* defined actually pass, distinguishes
+"the whole goal is met" from "a slice is met," and parks for you whenever a human judgment
+(a milestone) is pending.
+
 ---
 
 ## Keeping it up to date

@@ -1,14 +1,15 @@
 ---
 created: 2026-06-07
-status: spec / ready for intake (v2 — converged design + adversarial review folded in)
+status: BUILT 2026-06-08 (all 4 sub-features shipped on tbw/north-star; 408 tests pass, tsc clean)
 scope: epic (4 sub-features, single epic, dependency-ordered a→b→d→c)
 repo: ~/projects/thebashway
 source: multi-agent design pass (4 approaches judged + 4 adversarial lenses) → converged with Bashir → second adversarial pass folded in
+built: dogfood thebashway loop (per-phase building bashas + 3-lens cold review + fold). Commits — (a) 2c71e10, (b) a623837, (d) c880343, (c) 150541b.
 ---
 
 # thebashway North Star — Per-Project Design Brief (v2)
 
-**Status:** spec / ready for intake (v2) · **Scope:** one epic, 4 sub-features built a→b→d→c · **Repo:** `~/projects/thebashway` · **Author:** lead architect synthesis (two adversarial review rounds folded in)
+**Status:** BUILT 2026-06-08 — all four sub-features shipped on `tbw/north-star` (a `2c71e10` → b `a623837` → d `c880343` → c `150541b`); 408 tests pass, tsc clean. · **Scope:** one epic, 4 sub-features built a→b→d→c · **Repo:** `~/projects/thebashway` · **Author:** lead architect synthesis (two adversarial review rounds folded in)
 
 > **v2 note.** This document is the canonical replacement for the v1 spec. The v1 framing weighted *termination* as the headline purpose and then demoted it; a later design swing weighted *guidance* and demoted termination. **Both were wrong.** v2 settles the model: the brief is the living **project definition / guiding light**, and *guidance* and *autonomous termination* are **co-equal, both first-class** — two faces of one artifact. v2 also ships all four parts as **one epic in dependency order** (no MVP/defer split), adds the lean `conventions`/`glossary` schema fields, makes autonomous mode **part-or-all targetable**, and resolves a second round of adversarial findings (the v2 review-resolution subsection at the end). Every hard-won v1 detail — the two invariants, `CheckSpec`, `classifyDrift`, the parse-failure loud signal, the `confirmed:true` invariant, the exact hook points, the Review-resolution table — is **preserved**, not regenerated.
 
