@@ -167,9 +167,11 @@ Update the existing north-star interview section to:
 - **INV-B** — the brief stays a zod-validated TS module; the writer renders that exact shape; `loadBrief` (dynamic import + `safeParse`) is unchanged.
 - **Back-compat** — `requireBrief` is optional-with-default and resolved in the spread; `--skip-brief` + `requireBrief:false` keep headless/automation/dogfood working; non-work commands are never gated.
 
-## 8. Open questions / risks
+## 8. Resolved decisions (confirmed with Bashir 2026-06-08) + risks
 
-1. **Default-true gate blast radius.** The moment this ships, every repo without a confirmed brief is gated. *Mitigation:* the override paths + the dogfood/example `requireBrief:false` + the guided (non-crash) message. **Confirm:** is default-true acceptable for *existing* repos, or should the first run print a one-time "the gate is now on; run `thebashway brief` or set `requireBrief:false`" notice?
-2. **`requireBrief` placement.** On `RailsBinding` for spread-resolution consistency with `briefDriftSensitivity`, though semantically it is a workflow gate, not a person-reaching rail. **Confirm** vs a top-level `ProjectBinding.requireBrief`.
-3. **Confirm guard strictness.** The guard refuses `confirmed:true` while any Ring-1 core field (purpose/whoServed/scope/limits) is empty; `whyNow` is intentionally excluded (the interview never asks it) and the deferred success-command placeholder is the single allowed gap under confirmed. Confirm this core set is the right line.
-4. **Partial-save chattiness.** Saving after every ring writes the file a few times per interview. Cheap and durable; flagged only so it is a choice, not an accident.
+1. **Gate applies to existing repos too (RESOLVED: yes).** Default-true is the intended "north-star-first" stance and applies to already-using repos, not just new ones. The guided (non-crash) message that fires on a gate-stop **includes the opt-out** ("…or set `requireBrief:false` / pass `--skip-brief`"), so the message itself is the heads-up — no separate one-time notice needed. Override paths + the dogfood/example `requireBrief:false` keep automation working.
+2. **`requireBrief` placement (RESOLVED: `RailsBinding`).** Kept on `RailsBinding` for spread-resolution consistency with `briefDriftSensitivity` — an internal organization choice, no user-facing effect.
+3. **Confirm-guard line (RESOLVED: Ring-1 core).** Confirmation requires purpose/whoServed/scope/limits; `whyNow` and the deferred success-check are intentionally optional and never block.
+4. **Partial saves at ring boundaries (RESOLVED).** The interview saves at ring boundaries / pauses — a few writes per interview, cheap and durable. Internal; no user-facing effect.
+
+**Residual risk — rubber-stamp confirm.** A guided gate could nudge an owner to confirm a thin brief just to unblock work. *Mitigation:* the confirm guard requires the Ring-1 core (not just any non-empty draft), and `gapsOf` keeps remaining gaps visible in the status. Inherently a human-discipline limit, same as the parent epic's Risk 1.
