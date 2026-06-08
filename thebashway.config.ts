@@ -32,6 +32,8 @@ export default defineThebashway({
     // not a deploy gate (deploy/publish are NOT rails — see the deploy-by-default doctrine).
     territoryGlobs: [],
     keywords: /\b(?:send|email|sms|message|delete|destroy|drop|purge|wipe)\b/i,
+    // the engine builds itself headlessly; the brief gate is opt-out here (no human interview mid-self-build).
+    requireBrief: false,
   },
   learning: {
     global: null,

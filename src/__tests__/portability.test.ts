@@ -96,3 +96,12 @@ test("getRequireBrief reflects a requireBrief:false binding, then resetBinding r
   resetBinding();
   expect(getRequireBrief()).toBe(true);
 });
+
+test("nextjs-minimal example opts out of the brief gate", () => {
+  // the example exports the binding as a named `binding` (not default).
+  expect(nextjs.rails.requireBrief).toBe(false);
+});
+
+test("lifeofbash example opts out of the brief gate", () => {
+  expect(lifeofbash.rails.requireBrief).toBe(false);
+});
