@@ -25,6 +25,8 @@ import {
 import type { CompletableItem } from "../../audit";
 import { parseQueue, type QueueItem } from "../../queue";
 import type { DrainReport } from "../../drain";
+import { DesignBriefSchema, type DesignBrief } from "../../brief";
+import type { LoadBriefResult } from "../../load-brief";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -86,14 +88,33 @@ interface StubControl {
   reviews: (DesignReview | null)[];
   drain?: DrainReport;
   landOk?: boolean;
+  /** Inject a fake brief loader (phase b). When set, runFeatureDesign loads the brief ONCE. */
+  loadBrief?: (briefPath: string) => Promise<LoadBriefResult>;
+  /** Inject a fake Opus Tier-2 alignment refiner (phase b). */
+  runAlignmentCheck?: (design: FeatureDesign, brief: DesignBrief) => Promise<{ material: boolean; reason?: string; offer?: string }>;
 }
 function stubDeps(c: StubControl) {
-  const calls = { design: 0, decompose: 0, review: 0, drain: 0, land: 0, notify: [] as string[], drainAllowTitles: [] as string[], drainN: 0 };
+  const calls = {
+    design: 0,
+    decompose: 0,
+    review: 0,
+    drain: 0,
+    land: 0,
+    notify: [] as string[],
+    drainAllowTitles: [] as string[],
+    drainN: 0,
+    loadBrief: 0,
+    alignment: 0,
+    designBriefs: [] as (DesignBrief | null | undefined)[],
+    decomposeBriefs: [] as (DesignBrief | null | undefined)[],
+  };
   const deps: DesignDeps = {
-    async runDesign() {
+    async runDesign(_description, brief) {
+      calls.designBriefs.push(brief);
       return c.designs[Math.min(calls.design++, c.designs.length - 1)] ?? null;
     },
-    async runDecompose() {
+    async runDecompose(_design, brief) {
+      calls.decomposeBriefs.push(brief);
       return c.tasks[Math.min(calls.decompose++, c.tasks.length - 1)] ?? [];
     },
     async runReview() {
@@ -113,9 +134,46 @@ function stubDeps(c: StubControl) {
       calls.notify.push(t);
       return true;
     },
+    ...(c.loadBrief
+      ? {
+          loadBrief: async (briefPath: string) => {
+            calls.loadBrief++;
+            return c.loadBrief!(briefPath);
+          },
+        }
+      : {}),
+    ...(c.runAlignmentCheck
+      ? {
+          runAlignmentCheck: async (design: FeatureDesign, brief: DesignBrief) => {
+            calls.alignment++;
+            return c.runAlignmentCheck!(design, brief);
+          },
+        }
+      : {}),
   };
   return { deps, calls };
 }
+
+// A confirmed brief fixture for the phase-b alignment tests (one required `command` criterion so
+// the .refine() passes; confirmed:true so classifyDrift's teeth are live).
+function confirmedBrief(overrides: Partial<Record<string, unknown>> = {}): DesignBrief {
+  return DesignBriefSchema.parse({
+    confirmed: true,
+    narrative: "prose",
+    purpose: "p",
+    whyNow: "n",
+    whoServed: "w",
+    scope: "s",
+    limits: "l",
+    inScopeSurfaces: [],
+    forbiddenSurfaces: [],
+    forbiddenTerritory: [],
+    successCriteria: [{ id: "tests", statement: "tests pass", check: { kind: "command", run: "bun test" }, required: true }],
+    milestones: [],
+    ...overrides,
+  });
+}
+const okLoad = (brief: DesignBrief): (() => Promise<LoadBriefResult>) => async () => ({ brief, status: "ok", errors: [] });
 
 // ---------------------------------------------------------------------------
 // Pure gates
@@ -199,6 +257,31 @@ test("schemas accept well-formed payloads", () => {
   expect(FeatureDesignSchema.safeParse(fd()).success).toBe(true);
   expect(DecompositionSchema.safeParse([ci()]).success).toBe(true);
   expect(DesignReviewSchema.safeParse(review({ taskVerdicts: [{ index: 0, buildReady: true, reason: "ok" }] })).success).toBe(true);
+});
+
+test("FeatureDesignSchema accepts affectsTerritory and defaults it to [] when absent (old outputs still parse)", () => {
+  // a design output that DOES emit the new structured drift signal
+  const withTerritory = FeatureDesignSchema.safeParse({
+    surface: "tools",
+    surfaceRationale: "an automation",
+    title: "Feature X",
+    summary: "does X",
+    affectsTerritory: ["tools/orchestrator/x.ts", "tools/jobs/**"],
+    openQuestions: [],
+  });
+  expect(withTerritory.success).toBe(true);
+  if (withTerritory.success) expect(withTerritory.data.affectsTerritory).toEqual(["tools/orchestrator/x.ts", "tools/jobs/**"]);
+
+  // a PRE-brief design output (no affectsTerritory field) still parses, defaulting to []
+  const legacy = FeatureDesignSchema.safeParse({
+    surface: "tools",
+    surfaceRationale: "an automation",
+    title: "Feature X",
+    summary: "does X",
+    openQuestions: [],
+  });
+  expect(legacy.success).toBe(true);
+  if (legacy.success) expect(legacy.data.affectsTerritory).toEqual([]);
 });
 
 test("parse helpers pull fenced JSON and reject malformed", () => {
@@ -492,5 +575,160 @@ test("a design the review rejects TWICE forces every task @needs-intake (never a
   expect((await readItems(q)).find((i) => i.title === "T")?.status).toBe("needs-intake");
   expect(report.gated.structuralRevise).toContain("T");
   expect(calls.drain).toBe(0);
+  cleanup(q);
+});
+
+// ---------------------------------------------------------------------------
+// Phase (b): the design-door alignment gate — ADVISORY only (spec 6, §5.2)
+// ---------------------------------------------------------------------------
+
+test("DRIFT-NEVER-BLOCKS: a design classifyDrift deems material yields alignment.material=true but report.aborted=false, NO task forced needs-intake, run proceeds", async () => {
+  const q = await emptyQueue();
+  // A confirmed brief whose CORE SCOPE the fake design violates: the design lands on "tools" but
+  // "tools" is a forbidden surface (medium sensitivity default fires on this low-tier contradiction).
+  const brief = confirmedBrief({ forbiddenSurfaces: ["tools"] });
+  const { deps, calls } = stubDeps({
+    loadBrief: okLoad(brief),
+    designs: [fd({ surface: "tools", title: "Off-scope feature", affectsTerritory: ["tools/orchestrator/x.ts"] })],
+    tasks: [[ci({ title: "Add helper", territory: ["tools/orchestrator/x.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true }] })],
+    drain: drainReport({ claimed: ["Add helper"], succeeded: ["Add helper"] }),
+    landOk: true,
+  });
+  const report = await runFeatureDesign(
+    { description: "off-scope", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts" },
+    deps,
+  );
+
+  // The advisory signal fired…
+  expect(report.alignment?.material).toBe(true);
+  // …but it NEVER aborts, NEVER forces needs-intake, NEVER breaks the loop: the run proceeds.
+  expect(report.aborted).toBeUndefined();
+  const items = await readItems(q);
+  expect(items.find((i) => i.title === "Add helper")?.status).toBe("unclaimed"); // NOT needs-intake
+  expect(calls.drain).toBe(1); // it built
+  expect(report.landed).toBe(true);
+  expect(calls.loadBrief).toBe(1); // loaded exactly once
+  cleanup(q);
+});
+
+test("an in-scope confirmed design produces NO alignment signal (no nag) and the brief loads once", async () => {
+  const q = await emptyQueue();
+  // inScopeSurfaces includes "tools"; the design is on "tools" → no drift at default 'medium'.
+  const brief = confirmedBrief({ inScopeSurfaces: ["tools"] });
+  const { deps, calls } = stubDeps({
+    loadBrief: okLoad(brief),
+    designs: [fd({ surface: "tools", title: "In-scope feature", affectsTerritory: ["tools/orchestrator/x.ts"] })],
+    tasks: [[ci({ title: "Add helper", territory: ["tools/orchestrator/x.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true }] })],
+    drain: drainReport({ claimed: ["Add helper"], succeeded: ["Add helper"] }),
+  });
+  const report = await runFeatureDesign(
+    { description: "in-scope", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts" },
+    deps,
+  );
+  expect(report.alignment).toBeUndefined(); // no drift => no advisory signal
+  expect(calls.loadBrief).toBe(1);
+  // the pre-loaded brief threaded into BOTH stages (one load, never re-loaded per callsite)
+  expect(calls.designBriefs[0]).toBe(brief);
+  expect(calls.decomposeBriefs[0]).toBe(brief);
+  cleanup(q);
+});
+
+test("ALIGNMENT-NEVER-RELAXES-PARK: a person-reaching design deemed 'aligned' by Tier 2 STILL parks via classifyIrreversible", async () => {
+  const q = await emptyQueue();
+  // A brief that would flag the surface as drift (forbidden), BUT a fake Tier-2 says material:false
+  // ("aligned"). The person-reaching PARK rail must still fire — alignment never writes status.
+  const brief = confirmedBrief({ forbiddenSurfaces: ["tools"] });
+  const { deps, calls } = stubDeps({
+    loadBrief: okLoad(brief),
+    runAlignmentCheck: async () => ({ material: false, reason: "actually fine", offer: "build-anyway" }),
+    designs: [fd({ surface: "tools", title: "Notifier", affectsTerritory: ["tools/jobs/notifier.ts"] })],
+    // a person-reaching task the LLM review wrongly approves
+    tasks: [[ci({ title: "Email each person a digest", goal: "send each person an email", territory: ["tools/jobs/notifier.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true, reason: "looks fine" }] })],
+  });
+  const report = await runFeatureDesign(
+    { description: "notifier", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts", freezeAuthorized: true },
+    deps,
+  );
+  const items = await readItems(q);
+  // The PARK rail (classifyIrreversible) is UNCHANGED by the "aligned" Tier-2 verdict.
+  expect(items.find((i) => i.title === "Email each person a digest")?.status).toBe("needs-intake");
+  expect(report.gated.irreversible).toContain("Email each person a digest");
+  expect(calls.drain).toBe(0); // nothing build-ready (the person-reaching task is parked)
+  cleanup(q);
+});
+
+test("SINGLE-LOUD-SIGNAL: an unparseable brief notifies EXACTLY ONCE for the brief-unparseable reason and the design proceeds with NO brief", async () => {
+  const q = await emptyQueue();
+  const { deps, calls } = stubDeps({
+    loadBrief: async () => ({ brief: null, status: "unparseable", errors: ["botched human edit"] }),
+    designs: [fd({ surface: "tools", title: "Feature", affectsTerritory: ["tools/orchestrator/x.ts"] })],
+    tasks: [[ci({ title: "Add helper", territory: ["tools/orchestrator/x.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true }] })],
+    drain: drainReport({ claimed: ["Add helper"], succeeded: ["Add helper"] }),
+    landOk: true,
+  });
+  const report = await runFeatureDesign(
+    { description: "x", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts" },
+    deps,
+  );
+  // EXACTLY ONE notify carries the brief-unparseable reason (single loud signal for the run).
+  const unparseableNotifies = calls.notify.filter((n) => /brief unparseable/i.test(n));
+  expect(unparseableNotifies.length).toBe(1);
+  // The brief is loaded once and the run degrades to "no brief": no alignment signal, no brief
+  // threaded into the stages, build still proceeds.
+  expect(calls.loadBrief).toBe(1);
+  expect(report.alignment).toBeUndefined();
+  expect(calls.designBriefs[0]).toBeNull(); // degraded to no brief
+  expect(report.landed).toBe(true);
+  cleanup(q);
+});
+
+test("Tier 2 refines the advisory reason/offer when Tier 1 is material, but cannot DOWNGRADE the material verdict", async () => {
+  const q = await emptyQueue();
+  const brief = confirmedBrief({ forbiddenSurfaces: ["tools"] });
+  const { deps, calls } = stubDeps({
+    loadBrief: okLoad(brief),
+    // Tier 2 returns material:false (a downgrade attempt) — runFeatureDesign keeps the Tier-1
+    // material verdict and only ADOPTS the refined reason/offer (handled inside the alignment step).
+    runAlignmentCheck: async () => ({ material: false, reason: "refined reason", offer: "reshape it" }),
+    designs: [fd({ surface: "tools", title: "Off-scope", affectsTerritory: ["tools/orchestrator/x.ts"] })],
+    tasks: [[ci({ title: "Add helper", territory: ["tools/orchestrator/x.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true }] })],
+    drain: drainReport({ claimed: ["Add helper"], succeeded: ["Add helper"] }),
+  });
+  const report = await runFeatureDesign(
+    { description: "off-scope", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts" },
+    deps,
+  );
+  expect(calls.alignment).toBe(1); // Tier 2 fired (because Tier 1 was material)
+  expect(report.alignment?.material).toBe(true); // NOT downgraded
+  expect(report.alignment?.reason).toBe("refined reason"); // reason refined by Tier 2
+  expect(report.alignment?.offer).toBe("reshape it"); // offer refined by Tier 2
+  cleanup(q);
+});
+
+test("Tier 2 is NOT fired when Tier 1 finds no drift (model cost gated to material drift)", async () => {
+  const q = await emptyQueue();
+  const brief = confirmedBrief({ inScopeSurfaces: ["tools"] }); // in-scope design → no drift
+  let alignmentFired = 0;
+  const { deps } = stubDeps({
+    loadBrief: okLoad(brief),
+    runAlignmentCheck: async () => {
+      alignmentFired++;
+      return { material: true };
+    },
+    designs: [fd({ surface: "tools", title: "In-scope", affectsTerritory: ["tools/orchestrator/x.ts"] })],
+    tasks: [[ci({ title: "Add helper", territory: ["tools/orchestrator/x.ts"] })]],
+    reviews: [review({ taskVerdicts: [{ index: 0, buildReady: true }] })],
+    drain: drainReport({ claimed: ["Add helper"], succeeded: ["Add helper"] }),
+  });
+  await runFeatureDesign(
+    { description: "in-scope", queuePath: q, repoRoot: ".", decisionsPath: ".", briefPath: "/fake/brief.ts" },
+    deps,
+  );
+  expect(alignmentFired).toBe(0); // Tier 2 gated behind a material Tier-1 verdict
   cleanup(q);
 });

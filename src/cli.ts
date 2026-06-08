@@ -204,6 +204,8 @@ async function cmdFix(cwd: string, args: string[], configPath?: string): Promise
     decisionsPath: lb.paths.decisionsPath,
     surface: plan.surface,
     auditKind: designMode ? "design" : "correctness",
+    briefPath: lb.paths.briefPath,
+    notify: notifyOf(lb.binding),
   });
   const audit = await runAudit(
     { target, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun },
@@ -258,10 +260,11 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
     notify: notifyOf(lb.binding),
     runDrainStaged,
     landIntegration,
+    briefPath: lb.paths.briefPath,
   });
 
   const report = await runFeatureDesign(
-    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun, noDrain, noLand },
+    { description, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, briefPath: lb.paths.briefPath, dryRun, noDrain, noLand },
     deps,
   );
   if (report.aborted) {

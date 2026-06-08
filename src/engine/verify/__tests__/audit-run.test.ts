@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { unlinkSync, existsSync } from "node:fs";
 import {
   runAudit,
+  defaultAuditDeps,
   extractJsonBlock,
   parseFindings,
   parseVerdicts,
@@ -342,4 +343,97 @@ test("parseShaped: validates a single CompletableItem object, else null", () => 
     "\n```";
   expect(parseShaped(ok)?.title).toBe("T");
   expect(parseShaped('```json\n{"title":"only"}\n```')).toBeNull(); // missing required fields
+});
+
+// ---------------------------------------------------------------------------
+// Phase (b): audit-side brief effect is PROMPT-CONTEXT-ONLY (spec 5.3, §8b).
+// No new deterministic gate; it must NEVER raise the needs-intake count for design-kind
+// findings (already parked at :131), and correctness is never gated on the vision.
+// ---------------------------------------------------------------------------
+
+// A "money"-area finding TARGET resolves to the organs surface; its sub-area is under
+// organs/src/sections/money, which is where these shaped items must live to enqueue cleanly.
+
+test("design-kind finding: the design park clamps it to needs-intake regardless of the shaper's returned status — the brief never raises the design-kind needs-intake count", async () => {
+  // The audit-side brief effect is prompt-context only (§5.3): it must NEVER raise the
+  // needs-intake count for design-kind findings, which the unconditional design rail
+  // (audit-run.ts:131) already parks. We prove that by varying the shaper's RETURNED status
+  // (the only thing a brief-informed shaper could change) and asserting the count is clamped
+  // to 1 either way — the rail is what decides, not the shaper's (brief-informed) choice.
+  // First: the shaper returns a build-ready (unclaimed) design finding…
+  const p1 = await emptyQueue();
+  await runAudit(
+    opts(p1),
+    mkDeps({
+      runFinder: async () => [finding({ kind: "design", freezeSafe: false, confidence: 0.95 })],
+      runVerify: async (fs) => fs.map((f) => ({ finding: f, isReal: true, confidence: 0.95 })),
+      // the shaper (no brief) returns a fully build-ready item
+      runShape: async () => completable({ title: "Restyle the money card", status: "unclaimed", freezeSafe: false }),
+    }),
+  );
+  const itemsNoBrief = (await readItems(p1)).filter((i) => i.title === "Restyle the money card");
+  const needsIntakeNoBrief = itemsNoBrief.filter((i) => i.status === "needs-intake").length;
+
+  // …then the shaper instead returns needs-intake + an openQuestion (what a brief-informed
+  // shaper that judged the finding off the north star would emit).
+  const p2 = await emptyQueue();
+  await runAudit(
+    opts(p2),
+    mkDeps({
+      runFinder: async () => [finding({ kind: "design", freezeSafe: false, confidence: 0.95 })],
+      runVerify: async (fs) => fs.map((f) => ({ finding: f, isReal: true, confidence: 0.95 })),
+      runShape: async () =>
+        completable({ title: "Restyle the money card", status: "needs-intake", freezeSafe: false, openQuestion: "off the north star?" }),
+    }),
+  );
+  const itemsBrief = (await readItems(p2)).filter((i) => i.title === "Restyle the money card");
+  const needsIntakeBrief = itemsBrief.filter((i) => i.status === "needs-intake").length;
+
+  // The design-kind park makes the needs-intake count identical (1) regardless of the shaper's
+  // (brief-informed) returned status: the brief NEVER raises the design-kind needs-intake count.
+  expect(needsIntakeNoBrief).toBe(1);
+  expect(needsIntakeBrief).toBe(1);
+  expect(needsIntakeBrief).toBe(needsIntakeNoBrief);
+  cleanup(p1);
+  cleanup(p2);
+});
+
+test("a kind:'correctness' finding advancing no criterion stays build-ready — the brief never GATES a correctness finding (the shaping seam carries no brief; the vision never forces a correctness status)", async () => {
+  const p = await emptyQueue();
+  let shaperSawBriefArg = false;
+  const report = await runAudit(
+    opts(p),
+    mkDeps({
+      // a plain correctness finding (kind omitted => correctness), fully specified + high confidence
+      runFinder: async () => [finding({ kind: "correctness", freezeSafe: true, confidence: 0.95 })],
+      runVerify: async (fs) => fs.map((f) => ({ finding: f, isReal: true, confidence: 0.95 })),
+      runShape: async (...args) => {
+        // the runShape SEAM signature is (finding, confidence) — it carries NO brief argument, so
+        // the brief is never a deterministic INPUT to the shaping decision (it is at most prose
+        // context inside the real prompt). The audit core never threads the north star into the
+        // correctness build-ready decision, and no deterministic gate consults it for correctness.
+        shaperSawBriefArg = args.length > 2;
+        return completable({ title: "Fix the off-by-one", status: "unclaimed", freezeSafe: true });
+      },
+    }),
+  );
+  const items = await readItems(p);
+  expect(items.find((i) => i.title === "Fix the off-by-one")?.status).toBe("unclaimed"); // stays build-ready
+  expect(report.enqueued?.buildReady).toBe(1);
+  expect(shaperSawBriefArg).toBe(false); // the brief is not a deterministic arg to the shaping seam
+  cleanup(p);
+});
+
+test("defaultAuditDeps accepts briefPath (prompt-context wiring) and produces a usable AuditDeps", () => {
+  // The threading is wired without changing the deps' shape (the brief only flows into the
+  // shaper's PROMPT, built inside runShape — exercised live, not in unit tests).
+  const deps = defaultAuditDeps({
+    repoRoot: "/repo",
+    decisionsPath: "/repo/decisions.md",
+    surface: "organs",
+    briefPath: "/repo/.thebashway/brief.ts",
+  });
+  expect(typeof deps.runShape).toBe("function");
+  expect(typeof deps.runFinder).toBe("function");
+  expect(typeof deps.runVerify).toBe("function");
 });

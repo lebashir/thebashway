@@ -27,6 +27,10 @@ export const FeatureDesignSchema = z.object({
   title: z.string().min(1),
   /** What it is + the approach, grounded in what already exists in the repo. */
   summary: z.string().min(1),
+  /** The glob list this design will touch — the STRUCTURED drift signal classifyDrift tests
+   * against brief.forbiddenTerritory / inScopeSurfaces (no fuzzy prose matching). default([])
+   * keeps pre-brief design outputs parseable. */
+  affectsTerritory: z.array(z.string()).default([]),
   /** Genuine ambiguities only a human can resolve ([] is the goal). */
   openQuestions: z.array(z.string()).default([]),
 });

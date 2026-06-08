@@ -187,3 +187,24 @@ test("buildIntakePromptFromDisk: a pre-loaded `brief` takes precedence and brief
   expect(out).toContain("Pre-loaded purpose.");
   expect(called).toBe(false); // pre-loaded brief => briefPath path is not taken
 });
+
+// Phase (b): runFeatureDesign loads the brief ONCE and threads it PRE-LOADED into the design,
+// decompose, and shape callsites (so they never re-load / re-emit a park). This is the exact
+// path those callsites use — a pre-loaded brief renders the North-star block, no disk load.
+test("a pre-loaded brief renders the North-star block via the FromDisk path the 3 design/audit callsites use", async () => {
+  const pre = briefFixture({ purpose: "The threaded north star." });
+  let loadAttempted = false;
+  const out = await buildIntakePromptFromDisk({
+    decisionsPath: "/nonexistent/decisions.md",
+    itemAreas: ["tools"],
+    taskBody: "INTAKE: shape this",
+    brief: pre, // the callsites pass the pre-loaded brief (NOT briefPath) so the load happens once
+    onBriefStatus: () => {
+      loadAttempted = true;
+    },
+  });
+  expect(out).toContain("North star — build toward this:");
+  expect(out).toContain("The threaded north star."); // the threaded brief's purpose renders
+  expect(out).toContain("INTAKE: shape this");
+  expect(loadAttempted).toBe(false); // pre-loaded => no second disk load / no second loud signal
+});
