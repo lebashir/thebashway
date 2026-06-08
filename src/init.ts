@@ -159,7 +159,7 @@ const EMPTY_REPO_GAPS = [
 ];
 
 /** Serialize a brief draft to a `brief.ts` module that `export default`s a zod-loadable object (INV-B). */
-function briefModule(fields: BriefDraftFields): string {
+export function briefModule(fields: BriefDraftFields): string {
   const obj = {
     confirmed: fields.confirmed,
     narrative: fields.narrative,
