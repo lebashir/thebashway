@@ -1,7 +1,19 @@
 // tools/orchestrator/verify/run.ts
 import type { RunResult, Runner } from "./types";
 
-/** Default Runner: spawn a process, capture stdout/stderr + exit code. */
+/**
+ * Default Runner: spawn a process, capture stdout/stderr + exit code.
+ *
+ * When `opts.timeoutMs` is set, the process is killed once it elapses and the
+ * call resolves with a non-zero exit code (`124`, the conventional timeout code)
+ * — a timeout is a FAILURE, never a pass. A SIGTERM that the child ignores is
+ * escalated to SIGKILL after a short grace period, so the wall-clock bound holds
+ * even for an uncooperative process. The real kill wiring is the only part of
+ * this seam that stays un-unit-tested; callers inject a fake Runner that returns
+ * the same shape to exercise the timeout DECISION.
+ */
+const TIMEOUT_KILL_GRACE_MS = 2_000;
+
 export const bunRun: Runner = async (cmd, opts = {}) => {
   const proc = Bun.spawn({
     cmd,
@@ -10,12 +22,39 @@ export const bunRun: Runner = async (cmd, opts = {}) => {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  await proc.exited;
-  return { code: proc.exitCode ?? -1, stdout, stderr } satisfies RunResult;
+
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  if (opts.timeoutMs != null) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill(); // SIGTERM; exited resolves once the process tears down
+      // Escalate to SIGKILL if SIGTERM is ignored, so a hung/hostile child can't
+      // outlive the timeout and defeat the wall-clock bound.
+      killTimer = setTimeout(() => proc.kill("SIGKILL"), TIMEOUT_KILL_GRACE_MS);
+    }, opts.timeoutMs);
+  }
+
+  try {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    await proc.exited;
+    if (timedOut) {
+      return {
+        code: 124,
+        stdout,
+        stderr: `${stderr}\n[timed out after ${opts.timeoutMs}ms]`,
+        timedOut: true,
+      } satisfies RunResult;
+    }
+    return { code: proc.exitCode ?? -1, stdout, stderr } satisfies RunResult;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (killTimer) clearTimeout(killTimer);
+  }
 };
 
 export function parseNameOnly(stdout: string): string[] {

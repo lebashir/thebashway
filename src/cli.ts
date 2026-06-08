@@ -31,7 +31,11 @@ import { resolveTarget, effectiveQueueStatus } from "./engine/audit";
 import { drain, defaultDrainDeps, type DrainDeps } from "./engine/drain";
 import { runAudit, defaultAuditDeps } from "./engine/audit-run";
 import { runFeatureDesign, defaultDesignDeps } from "./engine/design-run";
-import { gitHead } from "./engine/verify/run";
+import { gitHead, bunRun } from "./engine/verify/run";
+import { runToGoal, type RunToGoalDeps } from "./engine/autonomous";
+import { evaluateCheckSpec } from "./engine/brief-eval";
+import { emitPark } from "./engine/park";
+import { SURFACES } from "./engine/config";
 
 // ---------------------------------------------------------------------------
 // Binding loading + path derivation (pure-ish, unit-tested)
@@ -277,6 +281,90 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   return 0;
 }
 
+/**
+ * AUTONOMOUS-TO-GOAL (spec 5.4): re-invoke the drain until the brief's target slice (or the whole
+ * required set) is met, under REQUIRED caps. `--target <id,…>` aims at a slice (PART); omitted =
+ * all required ids (ALL). The milestone proposal path routes via emitPark/sinks — NEVER an auto
+ * `git push origin main` (memory main-branch-classifier-gate).
+ */
+async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  tlsGuard();
+
+  const tIdx = args.indexOf("--target");
+  const targetCriteria =
+    tIdx >= 0 && args[tIdx + 1]
+      ? args[tIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+  const surface = lb.binding.defaultSurface;
+  const baseRef = await gitHead(lb.paths.repoRoot);
+  const notify = notifyOf(lb.binding);
+
+  // The EvalCtx the termination ORACLE runs criteria under (surface chain for `verify` checks).
+  const sc = SURFACES[surface];
+  const evalSurface = sc ? { dir: resolve(lb.paths.repoRoot, sc.dir), env: sc.env, chain: sc.chain } : undefined;
+
+  // Park surfaces for the human-gate (NOW.md + queue.md + optional external sink).
+  const nowPath = join(lb.paths.repoRoot, ".thebashway", "NOW.md");
+  const eventSink = lb.binding.sinks?.eventSink;
+
+  const deps: RunToGoalDeps = {
+    loadBrief,
+    evaluateCheckSpec,
+    evalCtx: { repoRoot: lb.paths.repoRoot, run: bunRun, surface: evalSurface },
+    runDrain: (o) => drain(o, drainDepsFor(lb, o.surface, baseRef, notify)),
+    runAudit: (o) =>
+      runAudit(
+        o,
+        defaultAuditDeps({
+          repoRoot: lb.paths.repoRoot,
+          decisionsPath: lb.paths.decisionsPath,
+          surface,
+          briefPath: lb.paths.briefPath,
+          notify,
+        }),
+      ),
+    notify: (text) => notify(text).then(() => true),
+    emitPark: async (title, reason) => {
+      await emitPark(title, reason, {
+        queuePath: lb.paths.queuePath,
+        nowPath,
+        emitExternal: eventSink
+          ? async (e, kind) => {
+              await eventSink({ action: kind, target: e.item, reason: e.reason, cascade: e.cascade });
+            }
+          : undefined,
+      });
+    },
+    now: Date.now,
+  };
+
+  const result = await runToGoal(
+    {
+      surface,
+      queuePath: lb.paths.queuePath,
+      repoRoot: lb.paths.repoRoot,
+      briefPath: lb.paths.briefPath,
+      targetCriteria,
+      // REQUIRED caps (memory bashir-cost-sensitive): three independent axes. maxIterations
+      // (default 5, in runToGoal) bounds drain passes; maxWallClockMs is the time backstop;
+      // costCeiling bounds the cumulative BUILD BASHAS spawned (the real LLM-spend driver) — a
+      // distinct axis that can bite before 5 iterations when drains are productive.
+      maxWallClockMs: 60 * 60_000,
+      costCeiling: 12,
+    },
+    deps,
+  );
+
+  console.log(
+    `run-to-goal: ${result.reason} (goalMet=${result.goalMet}, built ${result.built} in ${result.iterations} iter; target [${result.target.join(", ") || "—"}])`,
+  );
+  if (result.failingRequired.length) {
+    console.log(`  still-failing required: ${result.failingRequired.join(", ")}`);
+  }
+  return result.goalMet ? 0 : 1;
+}
+
 function usage(): void {
   console.log(`thebashway — autonomous Build + Fix for your repo
 
@@ -290,6 +378,9 @@ function usage(): void {
                                          BUILD: design a new feature, then build it
   thebashway "<request>"                 auto-route to build or fix
   thebashway brief                       (re)seed + print the per-project north star draft + its gaps
+  thebashway run-to-goal [--target <id,…>]
+                                         AUTONOMOUS: re-drain until the brief's target (a slice via
+                                         --target, or all required criteria) is met, under caps
   thebashway audit-plan <target>         print the resolved plan (no model calls)
   thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
   thebashway check-sync                  report drift vs the lifeofbash engine
@@ -319,6 +410,8 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
     case "brief":
       return cmdBrief(cwd, args, configPath);
+    case "run-to-goal":
+      return cmdRunToGoal(cwd, args, configPath);
     case "fix":
       return cmdFix(cwd, args, configPath);
     case "build":

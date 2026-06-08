@@ -5,6 +5,7 @@ import { unlinkSync, existsSync } from "node:fs";
 import { drain, type DrainDeps } from "../../drain";
 import { parseQueue, type QueueItem } from "../../queue";
 import { DRAIN_BREAKER } from "../../config";
+import { DesignBriefSchema, type DesignBrief } from "../../brief";
 
 // ---------------------------------------------------------------------------
 // Temp queue scaffolding — the loop runs against the REAL flock-guarded
@@ -375,5 +376,196 @@ test("land is SKIPPED when nothing succeeded", async () => {
   );
   expect(report.succeeded).toEqual([]);
   expect(calls.land).toEqual([]);
+  cleanup(p);
+});
+
+// ---------------------------------------------------------------------------
+// In-drain EARLY-STOP seam (spec 5.4): stopWhenBriefMet + briefSatisfied?/loadBrief?.
+// Back-compat is critical — the seam is OPTIONAL; every test above runs WITHOUT it and stays
+// green, proving "seam omitted => today's behavior."
+// ---------------------------------------------------------------------------
+
+// A minimal confirmed, terminable brief the loadBrief? fake returns.
+function fakeBrief(): DesignBrief {
+  return DesignBriefSchema.parse({
+    confirmed: true,
+    purpose: "p",
+    whyNow: "w",
+    whoServed: "o",
+    scope: "s",
+    limits: "l",
+    successCriteria: [{ id: "tests", statement: "tests pass", check: { kind: "command", run: "true" }, required: true }],
+    milestones: [],
+  });
+}
+
+test("stopWhenBriefMet:true + briefSatisfied true after the first integrate => goalMet, loop breaks WITHOUT a new claim, landFn STILL runs on green", async () => {
+  // Two claimable items. The early-stop fires after the FIRST integrate, so the second is never
+  // claimed; what is green still LANDS via the unchanged landFn.
+  const p = await writeQueue([
+    itemBlock({ title: "First", territory: "tools/f/**" }),
+    itemBlock({ title: "Second", territory: "tools/s/**" }),
+  ]);
+  const calls = mkCalls();
+  let satisfiedCalls = 0;
+  const report = await drain(
+    { surface: "tools", queuePath: p, repoRoot: "/repo", noPreflight: true, session: "t", n: 10, stopWhenBriefMet: true, briefPath: "/repo/brief.ts" },
+    mkDeps(
+      {
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async () => {
+          satisfiedCalls++;
+          return true; // met after the first integrate
+        },
+      },
+      calls,
+    ),
+  );
+  expect(report.goalMet).toBe(true);
+  expect(report.succeeded).toEqual(["First"]); // ONLY the first item — the loop broke before claiming Second
+  expect(calls.basha).toEqual(["First"]); // Second never built
+  expect(satisfiedCalls).toBe(1);
+  // landFn still runs on green (the early-stop gates NEW CLAIMS, never the land of what is green).
+  expect(report.landed).toBe(true);
+  expect(calls.land).toEqual(["tbw/integration-tools->main"]);
+  // Second is still claimable in the queue (never touched).
+  const items = await readItems(p);
+  expect(items.find((i) => i.title === "Second")?.status).toBe("unclaimed");
+  cleanup(p);
+});
+
+test("stopWhenBriefMet:true but briefSatisfied false => no early stop, both items build (seam is opt-in and only stops when MET)", async () => {
+  const p = await writeQueue([
+    itemBlock({ title: "A1", territory: "tools/a1/**" }),
+    itemBlock({ title: "A2", territory: "tools/a2/**" }),
+  ]);
+  const calls = mkCalls();
+  const report = await drain(
+    { surface: "tools", queuePath: p, repoRoot: "/repo", noPreflight: true, session: "t", n: 10, land: false, stopWhenBriefMet: true, briefPath: "/repo/brief.ts" },
+    mkDeps(
+      {
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async () => false,
+      },
+      calls,
+    ),
+  );
+  expect(report.goalMet).toBeUndefined();
+  expect(new Set(report.succeeded)).toEqual(new Set(["A1", "A2"]));
+  cleanup(p);
+});
+
+test("targetCriteria on DrainOptions is threaded into briefSatisfied's target arg (the fake receives the expected Set)", async () => {
+  const p = await writeQueue([itemBlock({ title: "T1", territory: "tools/t1/**" })]);
+  const calls = mkCalls();
+  let seenTarget: Set<string> | undefined;
+  let seenIsSet = false;
+  await drain(
+    {
+      surface: "tools",
+      queuePath: p,
+      repoRoot: "/repo",
+      noPreflight: true,
+      session: "t",
+      land: false,
+      stopWhenBriefMet: true,
+      briefPath: "/repo/brief.ts",
+      targetCriteria: ["alpha", "beta"],
+    },
+    mkDeps(
+      {
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async (_brief, target) => {
+          seenIsSet = target instanceof Set;
+          seenTarget = target;
+          return true;
+        },
+      },
+      calls,
+    ),
+  );
+  expect(seenIsSet).toBe(true);
+  expect(seenTarget && [...seenTarget].sort()).toEqual(["alpha", "beta"]);
+  cleanup(p);
+});
+
+test("the allowTitles (design-door) drain IGNORES stopWhenBriefMet — feature-atomic, never self-terminates on a global goal", async () => {
+  // Two allowed titles; even though briefSatisfied would return true, the feature-isolated drain
+  // never consults the early-stop seam, so BOTH build and briefSatisfied is never called.
+  const p = await writeQueue([
+    itemBlock({ title: "FeatOne", territory: "tools/fo/**" }),
+    itemBlock({ title: "FeatTwo", territory: "tools/ft/**" }),
+  ]);
+  const calls = mkCalls();
+  let satisfiedCalls = 0;
+  const report = await drain(
+    {
+      surface: "tools",
+      queuePath: p,
+      repoRoot: "/repo",
+      noPreflight: true,
+      session: "t",
+      n: 10,
+      land: false,
+      stopWhenBriefMet: true,
+      briefPath: "/repo/brief.ts",
+      claimTitles: ["FeatOne", "FeatTwo"],
+    },
+    mkDeps(
+      {
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async () => {
+          satisfiedCalls++;
+          return true;
+        },
+      },
+      calls,
+    ),
+  );
+  expect(satisfiedCalls).toBe(0); // never consulted
+  expect(report.goalMet).toBeUndefined();
+  expect(new Set(report.succeeded)).toEqual(new Set(["FeatOne", "FeatTwo"])); // both built
+  cleanup(p);
+});
+
+test("breaker still trips regardless of the early-stop seam (seam never bypasses shouldTrip)", async () => {
+  const p = await writeQueue([
+    itemBlock({ title: "X1", territory: "tools/x1/**" }),
+    itemBlock({ title: "X2", territory: "tools/x2/**" }),
+    itemBlock({ title: "X3", territory: "tools/x3/**" }),
+  ]);
+  const calls = mkCalls();
+  const report = await drain(
+    { surface: "tools", queuePath: p, repoRoot: "/repo", noPreflight: true, session: "t", n: 10, land: false, stopWhenBriefMet: true, briefPath: "/repo/brief.ts" },
+    mkDeps(
+      {
+        runBasha: async (item, ctx) => ({ ok: false, branch: ctx.branch, reason: "boom" }),
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async () => true, // would early-stop on a SUCCESS, but there are no successes
+      },
+      calls,
+    ),
+  );
+  expect(report.breakerTripped).toBe(true);
+  expect(report.goalMet).toBeUndefined(); // early-stop only fires after a SUCCESSFUL integrate
+  cleanup(p);
+});
+
+test("unsafeIntegrationBranch still aborts regardless of the early-stop seam", async () => {
+  const p = await writeQueue([itemBlock({ title: "U1", territory: "tools/u/**" })]);
+  const calls = mkCalls();
+  const report = await drain(
+    { surface: "tools", queuePath: p, repoRoot: "/repo", noPreflight: true, session: "t", integrationBranch: "main", stopWhenBriefMet: true, briefPath: "/repo/brief.ts" },
+    mkDeps(
+      {
+        loadBrief: async () => ({ brief: fakeBrief(), status: "ok", errors: [] }),
+        briefSatisfied: async () => true,
+      },
+      calls,
+    ),
+  );
+  expect(report.aborted).toBeTruthy();
+  expect(report.aborted).toContain("main");
+  expect(calls.basha).toEqual([]); // nothing processed
   cleanup(p);
 });
