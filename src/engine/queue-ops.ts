@@ -307,6 +307,38 @@ export function recordOpenQuestion(
 }
 
 /**
+ * Ensure a queue item titled `title` EXISTS so a subsequent `parkItem` has a target
+ * to flip. Idempotent: if an item with that title is already present (in ANY status —
+ * e.g. an already-`@parked` brief-update proposal), this is a no-op. Otherwise it
+ * appends a lightweight `@unclaimed` placeholder carrying `reason` as its goal/done-when.
+ *
+ * This is the missing half of the human-gate: `parkItem` (and thus `emitPark`) only
+ * FLIPS an existing item's status, so an engine-originated park whose title was never
+ * enqueued (a brief-update proposal, a milestone stop-and-ask) would otherwise write
+ * NOTHING to queue.md / NOW.md and be silently lost. The placeholder is `origin:"auto"`
+ * (engine-created, greppable). Returns true iff an item was created.
+ */
+export function ensureParkItem(
+  title: string,
+  reason: string,
+  queuePath: string,
+): Promise<boolean> {
+  return mutateQueue(queuePath, (items) => {
+    if (items.some((i) => i.title === title)) return false;
+    items.push({
+      title,
+      status: "unclaimed",
+      origin: "auto",
+      goal: reason,
+      territory: [],
+      doneWhen: "human reviews this parked item",
+      clarifications: [],
+    });
+    return true;
+  });
+}
+
+/**
  * Park an item — set status to `parked`, record the reason. Cascade: any item
  * whose `DependsOn` references this one and is currently @unclaimed flips to
  * `@parked-on:<title>`. Returns the list of titles affected (the parked item

@@ -35,6 +35,8 @@ import { gitHead, bunRun } from "./engine/verify/run";
 import { runToGoal, type RunToGoalDeps } from "./engine/autonomous";
 import { evaluateCheckSpec } from "./engine/brief-eval";
 import { emitPark } from "./engine/park";
+import { appendReflection } from "./engine/digest";
+import { runReflect } from "./engine/reflect";
 import { SURFACES } from "./engine/config";
 
 // ---------------------------------------------------------------------------
@@ -281,11 +283,75 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
   return 0;
 }
 
+/** The shared human-gate park closure: emitPark across queue.md + NOW.md + the optional external
+ *  sink. Reused by run-to-goal AND the milestone reflection — there is ONE park path, never a
+ *  brief writer (INV-A). */
+function emitParkFor(lb: LoadedBinding): (title: string, reason: string) => Promise<void> {
+  const nowPath = join(lb.paths.repoRoot, ".thebashway", "NOW.md");
+  const eventSink = lb.binding.sinks?.eventSink;
+  return async (title, reason) => {
+    await emitPark(title, reason, {
+      queuePath: lb.paths.queuePath,
+      nowPath,
+      emitExternal: eventSink
+        ? async (e, kind) => {
+            await eventSink({ action: kind, target: e.item, reason: e.reason, cascade: e.cascade });
+          }
+        : undefined,
+    });
+  };
+}
+
+/**
+ * MILESTONE REFLECTION (Loop C — spec 5.5). The proposedUpdate path (incl. conventions/glossary
+ * growth) fires ONLY on an EXPLICIT milestone marker, is RATE-LIMITED (no new proposal while one is
+ * parked), and BATCHES growth into the single proposal. It routes via emitPark/sinks + appendReflection
+ * — there is NO writeFileSync(briefPath) (INV-A): the engine cannot write the brief; a human acts on
+ * the parked proposal before any human-present writer touches brief.ts.
+ */
+async function runMilestoneReflection(
+  lb: LoadedBinding,
+  opts: {
+    milestone: string;
+    learned: string[];
+    briefStillValid: boolean;
+    onPath: boolean;
+    driftedCriteria?: string[];
+    isMilestone: boolean;
+    proposedUpdate?: string;
+    proposedConventions?: string[];
+    proposedGlossary?: { term: string; means: string }[];
+  },
+): Promise<void> {
+  const park = emitParkFor(lb);
+  const res = await runReflect(
+    {
+      ...opts,
+      logPath: lb.paths.runLogPath,
+      queuePath: lb.paths.queuePath,
+    },
+    {
+      appendReflection,
+      emitPark: park,
+      readQueue: async (queuePath) => {
+        const f = Bun.file(queuePath);
+        return (await f.exists()) ? await f.text() : "";
+      },
+    },
+  );
+  console.log(
+    res.parked
+      ? `reflect "${opts.milestone}": brief-update proposal PARKED for your review (human-gated; not written).`
+      : `reflect "${opts.milestone}": logged${res.suppressedReason ? ` (no park: ${res.suppressedReason})` : ""}.`,
+  );
+}
+
 /**
  * AUTONOMOUS-TO-GOAL (spec 5.4): re-invoke the drain until the brief's target slice (or the whole
  * required set) is met, under REQUIRED caps. `--target <id,…>` aims at a slice (PART); omitted =
- * all required ids (ALL). The milestone proposal path routes via emitPark/sinks — NEVER an auto
- * `git push origin main` (memory main-branch-classifier-gate).
+ * all required ids (ALL). `--milestone <label>` marks this run as an epic-completion milestone so a
+ * successful terminal fires the Loop-C reflection (a brief-update proposal routes via emitPark/sinks
+ * — NEVER an auto `git push origin main`, memory main-branch-classifier-gate).
  */
 async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): Promise<number> {
   const lb = await loadBinding({ cwd, configPath });
@@ -296,6 +362,8 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
     tIdx >= 0 && args[tIdx + 1]
       ? args[tIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
       : undefined;
+  const mIdx = args.indexOf("--milestone");
+  const milestone = mIdx >= 0 ? args[mIdx + 1] : undefined;
   const surface = lb.binding.defaultSurface;
   const baseRef = await gitHead(lb.paths.repoRoot);
   const notify = notifyOf(lb.binding);
@@ -303,10 +371,6 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
   // The EvalCtx the termination ORACLE runs criteria under (surface chain for `verify` checks).
   const sc = SURFACES[surface];
   const evalSurface = sc ? { dir: resolve(lb.paths.repoRoot, sc.dir), env: sc.env, chain: sc.chain } : undefined;
-
-  // Park surfaces for the human-gate (NOW.md + queue.md + optional external sink).
-  const nowPath = join(lb.paths.repoRoot, ".thebashway", "NOW.md");
-  const eventSink = lb.binding.sinks?.eventSink;
 
   const deps: RunToGoalDeps = {
     loadBrief,
@@ -325,17 +389,7 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
         }),
       ),
     notify: (text) => notify(text).then(() => true),
-    emitPark: async (title, reason) => {
-      await emitPark(title, reason, {
-        queuePath: lb.paths.queuePath,
-        nowPath,
-        emitExternal: eventSink
-          ? async (e, kind) => {
-              await eventSink({ action: kind, target: e.item, reason: e.reason, cascade: e.cascade });
-            }
-          : undefined,
-      });
-    },
+    emitPark: emitParkFor(lb),
     now: Date.now,
   };
 
@@ -362,7 +416,59 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
   if (result.failingRequired.length) {
     console.log(`  still-failing required: ${result.failingRequired.join(", ")}`);
   }
+
+  // Loop C (spec 5.5): the EXPLICIT milestone marker fires the reflection. A successful terminal is
+  // the epic-completion signal; the per-feature lands inside drain do NOT propose (lightweight only).
+  // The reflection logs the note and — rate-limited/batched — parks a brief-update proposal. Without
+  // --milestone, run-to-goal never proposes a brief change (no propose-after-every-feature drip).
+  if (milestone) {
+    await runMilestoneReflection(lb, {
+      milestone,
+      learned: [`run-to-goal terminal: ${result.reason}`, `built ${result.built} item(s) in ${result.iterations} iteration(s)`],
+      briefStillValid: true,
+      onPath: result.failingRequired.length === 0,
+      driftedCriteria: result.failingRequired.length ? result.failingRequired : undefined,
+      isMilestone: true,
+    });
+  }
+
   return result.goalMet ? 0 : 1;
+}
+
+/**
+ * REFLECT (Loop C — spec 5.5): the explicit milestone marker. `--milestone <label>` (or `--epic`)
+ * marks an epic-completion milestone — the ONLY trigger for a brief-update proposal; without it the
+ * reflection logs a LIGHTWEIGHT per-feature note and NEVER parks a proposal. `--learned "<note>"`
+ * (repeatable), `--propose "<delta>"` stage a batched proposal. The proposal routes via emitPark/sinks
+ * + the run log — NEVER writeFileSync(briefPath) (INV-A): a human acts on the parked proposal before
+ * any human-present writer touches brief.ts.
+ */
+async function cmdReflect(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const flagVal = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const flagVals = (flag: string): string[] => {
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i++) if (args[i] === flag && args[i + 1]) out.push(args[i + 1]);
+    return out;
+  };
+  const milestone = flagVal("--milestone") ?? flagVal("--epic");
+  const isMilestone = args.includes("--milestone") || args.includes("--epic");
+  const learned = flagVals("--learned");
+  const proposedUpdate = flagVal("--propose");
+  const label = milestone ?? "feature land";
+
+  await runMilestoneReflection(lb, {
+    milestone: label,
+    learned,
+    briefStillValid: true,
+    onPath: true,
+    isMilestone,
+    proposedUpdate,
+  });
+  return 0;
 }
 
 function usage(): void {
@@ -378,9 +484,14 @@ function usage(): void {
                                          BUILD: design a new feature, then build it
   thebashway "<request>"                 auto-route to build or fix
   thebashway brief                       (re)seed + print the per-project north star draft + its gaps
-  thebashway run-to-goal [--target <id,…>]
+  thebashway run-to-goal [--target <id,…>] [--milestone <label>]
                                          AUTONOMOUS: re-drain until the brief's target (a slice via
-                                         --target, or all required criteria) is met, under caps
+                                         --target, or all required criteria) is met, under caps;
+                                         --milestone fires the Loop-C reflection on a successful run
+  thebashway reflect --milestone <label> [--learned "<note>"…] [--propose "<delta>"]
+                                         LOOP C: log a milestone reflection; --milestone/--epic is the
+                                         ONLY trigger that stages a human-gated brief-update proposal
+                                         (rate-limited, batched); never writes the brief
   thebashway audit-plan <target>         print the resolved plan (no model calls)
   thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
   thebashway check-sync                  report drift vs the lifeofbash engine
@@ -412,6 +523,8 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return cmdBrief(cwd, args, configPath);
     case "run-to-goal":
       return cmdRunToGoal(cwd, args, configPath);
+    case "reflect":
+      return cmdReflect(cwd, args, configPath);
     case "fix":
       return cmdFix(cwd, args, configPath);
     case "build":

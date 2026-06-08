@@ -13,7 +13,7 @@
 //
 // The corresponding `emitUnpark()` flips dependents back to `@unclaimed` (via
 // unparkScan) and removes the NOW.md line + emits a follow-up external event.
-import { parkItem, unparkScan } from "./queue-ops";
+import { ensureParkItem, parkItem, unparkScan } from "./queue-ops";
 
 export interface ParkEvent {
   item: string;
@@ -95,12 +95,19 @@ async function refreshNowFromQueue(
  * - queue.md      → @parked (reason) + cascade to @parked-on:<title>
  * - NOW.md        → refresh the `## Parked` section
  * - emitExternal  → fire (best-effort)
+ *
+ * The item is ENSURED to exist first (idempotent — no-op if already present), because
+ * `parkItem` only FLIPS an existing item's status. An engine-originated park whose title
+ * was never enqueued (a brief-update proposal, a milestone stop-and-ask) would otherwise
+ * find no target, write nothing, and be silently lost. With the ensure step the park
+ * always lands on queue.md `@parked` + the NOW.md `## Parked` section.
  */
 export async function emitPark(
   title: string,
   reason: string,
   surfaces: ParkSurfaces,
 ): Promise<ParkEvent> {
+  await ensureParkItem(title, reason, surfaces.queuePath);
   const affected = await parkItem(title, reason, surfaces.queuePath);
   const event: ParkEvent = { item: title, reason, cascade: affected.filter((t) => t !== title) };
   await refreshNowFromQueue(surfaces.queuePath, surfaces.nowPath);
