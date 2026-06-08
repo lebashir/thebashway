@@ -17,7 +17,8 @@ and settings reference.
 | `thebashway reflect [--milestone <label>] [--epic] [--learned <note>] [--propose <delta>]` | **Milestone reflection (Loop C).** Log a reflection to the run log and — only on an explicit `--milestone`/`--epic` marker — stage a single, batched, rate-limited **brief-update proposal** through the human-gate (`queue.md @parked` + `NOW.md ## Parked`). It never writes the brief; you review and apply. |
 | `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
 | `thebashway update` | Update the thebashway clone in place: `git pull --ff-only` + `bun install`. Reaches every project that uses it (they share the one clone); per-project config/state is untouched. Refuses on a dirty tree or a non-git install. |
-| `thebashway check-sync` | Report commits to the lifeofbash engine since this package was last reconciled (drift). |
+| `thebashway verify [<surface>] [--base <ref>] [--territory <glob>…] [--json]` | Run the per-surface gate (required-touches, freshness, the chain, smoke) against the binding-derived repoRoot, write the manifest (`paths.manifest`), exit 0/1. Surface defaults to `defaultSurface`. |
+| Interactive driver verbs — `preflight` · `claim` · `park` · `unpark-scan` · `done` · `add` · `mark-ready` · `sweep` · `intake-list` · `intake-defer` · `seed-worktree` · `spawn-worktree` · `enqueue-findings` | Expose the loop's internals as commands so an agent can drive a build step-by-step in a live session (the interactive method — the higher-level `fix`/`build`/`run-to-goal` use them internally). Each loads the binding and reads paths + sinks from it. |
 | `--config <path>` | (Any command) use a binding file other than `./thebashway.config.ts`. |
 
 A `target` for `fix`/`audit-plan` is either a **registered name** (a key in
