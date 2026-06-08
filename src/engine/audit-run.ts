@@ -28,6 +28,7 @@ import {
   AUDIT_BUILDREADY_MIN_CONFIDENCE,
   AUDIT_CONFIRM_MIN_CONFIDENCE,
   AUDIT_MAX_ENQUEUE,
+  getDesignBar,
 } from "./config";
 
 export interface VerifiedFinding {
@@ -324,7 +325,7 @@ export function defaultAuditDeps(cfg: {
       const prompt = designMode
         ? `You are a READ-ONLY design auditor. Study the USER-FACING UI source under this sub-area ` +
           `of the ${plan.surface} surface:\n  ${subArea}\n(inside the target area ${plan.rootGlob}).\n` +
-          `Judge it against this design bar:\n${DESIGN_BAR}\n\n` +
+          `Judge it against this design bar:\n${getDesignBar() ?? DESIGN_BAR}\n\n` +
           `Find concrete, SOURCE-GROUNDED design-quality defects: deviations from the project's ` +
           `design system (a hardcoded value where a token exists, off-scale spacing, generic or ` +
           `default typography, missing hover / empty / loading / error states, weak hierarchy, not ` +

@@ -13,12 +13,14 @@
 //   drain [N] [flags]        run the OUT-door loop over the queue
 //   audit <target> [flags]   IN-door directed audit (enqueue only)
 //   audit-plan <target>      print the resolved plan (spawn-free)
-//   check-sync               report drift vs the lifeofbash engine
+//   verify [<surface>]       run the per-surface gate (binding-derived repoRoot + manifest)
+//   preflight/claim/park/done/add/mark-ready/sweep/intake-list/intake-defer/
+//   seed-worktree/spawn-worktree/enqueue-findings   interactive in-session driver verbs
 
 import { resolve, join, isAbsolute } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { setBinding, getRequireBrief } from "./engine/config";
+import { setBinding, getRequireBrief, getDefaultSurface } from "./engine/config";
 import { gapsOf } from "./engine/brief";
 import { writeConfirmedBrief, parseBriefWritePayload, briefGateDecision, briefStatusLines } from "./brief-writer";
 import { noopSinks, type Notify } from "./sinks";
@@ -26,17 +28,23 @@ import type { ProjectBinding, ResolvedBinding } from "./binding";
 import { classifyMode, defaultClassifyModeDeps } from "./router";
 import { runInit, initMessage, seedBriefIfAbsent } from "./init";
 import { loadBrief } from "./engine/load-brief";
-import { checkSync, readSyncRef } from "./check-sync";
 import { runUpdate, type Runner } from "./update";
+import { preflight, type PreflightSurface } from "./engine/preflight";
+import { seedWorktree, spawnWorktree } from "./engine/worktree-seed";
+import { claimNextN, markDone, appendCapture, markReady, recordOpenQuestion, enqueueFindings } from "./engine/queue-ops";
+import { runSweep } from "./engine/capture-sweep";
+import { listIntakeCandidates } from "./engine/auto-intake";
+import { runVerify } from "./engine/verify/index";
+import { z } from "zod";
 import { spawnSync } from "node:child_process";
-import { resolveTarget, effectiveQueueStatus } from "./engine/audit";
+import { resolveTarget, effectiveQueueStatus, CompletableItemSchema } from "./engine/audit";
 import { drain, defaultDrainDeps, type DrainDeps } from "./engine/drain";
 import { runAudit, defaultAuditDeps } from "./engine/audit-run";
 import { runFeatureDesign, defaultDesignDeps } from "./engine/design-run";
 import { gitHead, bunRun } from "./engine/verify/run";
 import { runToGoal, type RunToGoalDeps } from "./engine/autonomous";
 import { evaluateCheckSpec } from "./engine/brief-eval";
-import { emitPark } from "./engine/park";
+import { emitPark, emitUnparkScan, type ParkEvent } from "./engine/park";
 import { appendReflection } from "./engine/digest";
 import { runReflect } from "./engine/reflect";
 import { SURFACES } from "./engine/config";
@@ -49,6 +57,10 @@ export interface DerivedPaths {
   repoRoot: string;
   queuePath: string;
   runLogPath: string;
+  /** Always-on attention surface the park flow refreshes (binding.paths.now, default .thebashway/NOW.md). */
+  nowPath: string;
+  /** Where the verify gate writes its manifest (binding.paths.manifest). */
+  manifestPath: string;
   lessonsPath: string;
   decisionsPath: string;
   briefPath: string;
@@ -58,10 +70,13 @@ export interface DerivedPaths {
 export function derivePaths(binding: ProjectBinding): DerivedPaths {
   const root = binding.repoRoot;
   const rel = (p: string) => (isAbsolute(p) ? p : join(root, p));
+  const paths = binding.paths ?? {};
   return {
     repoRoot: root,
-    queuePath: join(root, ".thebashway", "queue.md"),
-    runLogPath: join(root, ".thebashway", "run-log.md"),
+    queuePath: rel(paths.queue ?? ".thebashway/queue.md"),
+    runLogPath: rel(paths.runLog ?? ".thebashway/run-log.md"),
+    nowPath: rel(paths.now ?? ".thebashway/NOW.md"),
+    manifestPath: rel(paths.manifest ?? ".thebashway/.verify-manifest.json"),
     lessonsPath: rel(binding.learning.local),
     decisionsPath: rel(binding.learning.decisions),
     briefPath: rel(binding.learning.brief ?? ".thebashway/brief.ts"),
@@ -113,27 +128,9 @@ async function cmdInit(cwd: string, args: string[]): Promise<number> {
   return r.prereqs.git ? 0 : 1;
 }
 
-function cmdCheckSync(): number {
-  const refPath = new URL("../.sync-ref", import.meta.url).pathname;
-  const ref = readSyncRef(refPath);
-  if (!ref) {
-    console.log("check-sync: no .sync-ref recorded — cannot compute drift.");
-    return 0;
-  }
-  const report = checkSync({ sinceRef: ref });
-  if (report.inSync) {
-    console.log(`In sync with lifeofbash tools/orchestrator @ ${ref} (no new commits).`);
-  } else {
-    console.log(`DRIFT: ${report.commits.length} commit(s) to tools/orchestrator since ${ref}:`);
-    for (const c of report.commits) console.log(`  ${c}`);
-  }
-  return 0;
-}
-
 function cmdUpdate(): number {
-  // The package clone's root: this file is src/cli.ts, so ".." is the repo root (same anchor
-  // check-sync uses for .sync-ref). Every project references this one clone — updating here
-  // updates them all; per-project config/state is untouched.
+  // The package clone's root: this file is src/cli.ts, so ".." is the repo root. Every project
+  // references this one clone — updating here updates them all; per-project config/state is untouched.
   const pkgRoot = new URL("..", import.meta.url).pathname;
   const run: Runner = (cmd, a, cwd) => {
     const r = spawnSync(cmd, a, { cwd, encoding: "utf8" });
@@ -327,7 +324,7 @@ async function cmdBuild(cwd: string, args: string[], configPath?: string): Promi
  *  sink. Reused by run-to-goal AND the milestone reflection — there is ONE park path, never a
  *  brief writer (INV-A). */
 function emitParkFor(lb: LoadedBinding): (title: string, reason: string) => Promise<void> {
-  const nowPath = join(lb.paths.repoRoot, ".thebashway", "NOW.md");
+  const nowPath = lb.paths.nowPath;
   const eventSink = lb.binding.sinks?.eventSink;
   return async (title, reason) => {
     await emitPark(title, reason, {
@@ -513,6 +510,247 @@ async function cmdReflect(cwd: string, args: string[], configPath?: string): Pro
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Granular driver verbs — the interactive in-session build loop. Each loads the
+// binding, reads paths + sinks from it, and hardcodes no project infra. These expose
+// the loop's internals as commands so an agent can drive it step by step (the
+// interactive method); the higher-level fix/build/run-to-goal use them internally.
+// ---------------------------------------------------------------------------
+
+function sessionId(argSession?: string): string {
+  return argSession || process.env.CLAUDE_SESSION_ID || process.env.USER || "anon";
+}
+
+/** Adapt the binding's eventSink to emitPark's emitExternal callback (undefined → no external emit). */
+function eventEmitter(lb: LoadedBinding): ((e: ParkEvent, kind: "parked" | "unparked") => Promise<void>) | undefined {
+  const eventSink = lb.binding.sinks?.eventSink;
+  if (!eventSink) return undefined;
+  return async (e, kind) => {
+    await eventSink({ action: kind, target: e.item, reason: e.reason, cascade: e.cascade });
+  };
+}
+
+async function cmdPreflight(cwd: string, surfaceName: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const cfg = lb.binding.surfaces[surfaceName];
+  if (!cfg) {
+    console.error(`unknown surface: ${surfaceName} (configured: ${Object.keys(lb.binding.surfaces).join(", ")})`);
+    return 2;
+  }
+  const surface: PreflightSurface = {
+    name: surfaceName,
+    cwd: resolve(lb.paths.repoRoot, cfg.dir),
+    repoRoot: lb.paths.repoRoot,
+    regen: cfg.regen ?? undefined,
+    derived: cfg.derived ?? [],
+    branchPattern: lb.binding.branchPattern,
+    seedPaths: lb.binding.seedPaths ?? [],
+  };
+  const r = await preflight(surface);
+  for (const c of r.checks) console.log(`  ${c.ok ? "ok" : "x"} ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
+  return r.ok ? 0 : 1;
+}
+
+async function cmdClaim(cwd: string, nRaw: number, session: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const cap = lb.binding.maxConcurrent;
+  const n = Math.max(1, Math.min(cap, nRaw || cap));
+  const claimed = await claimNextN(
+    n,
+    session,
+    (it) => `${(lb.binding.branchPattern || "tbw/*").replace(/\*$/, "")}${it.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`,
+    lb.paths.queuePath,
+  );
+  console.log(JSON.stringify(claimed, null, 2));
+  return claimed.length > 0 ? 0 : 1;
+}
+
+async function cmdPark(cwd: string, title: string, reason: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const evt = await emitPark(title, reason, {
+    queuePath: lb.paths.queuePath,
+    nowPath: lb.paths.nowPath,
+    emitExternal: eventEmitter(lb),
+  });
+  console.log(`parked: ${evt.item}${evt.cascade.length ? ` (cascade: ${evt.cascade.join(", ")})` : ""}`);
+  return 0;
+}
+
+async function cmdUnparkScan(cwd: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const unparked = await emitUnparkScan({
+    queuePath: lb.paths.queuePath,
+    nowPath: lb.paths.nowPath,
+    emitExternal: eventEmitter(lb),
+  });
+  console.log(unparked.length ? `unparked: ${unparked.join(", ")}` : "nothing to unpark");
+  return 0;
+}
+
+async function cmdDone(cwd: string, title: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const ok = await markDone(title, lb.paths.queuePath);
+  console.log(ok ? `done: ${title}` : `not found: ${title}`);
+  return ok ? 0 : 1;
+}
+
+async function cmdAdd(cwd: string, title: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  await appendCapture({ title }, lb.paths.queuePath);
+  console.log(`captured (needs-intake): ${title}`);
+  return 0;
+}
+
+async function cmdMarkReady(cwd: string, title: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const ok = await markReady(title, lb.paths.queuePath);
+  console.log(ok ? `build-ready: ${title}` : `not a needs-intake item: ${title}`);
+  return ok ? 0 : 1;
+}
+
+async function cmdSweep(cwd: string, max: number | undefined, dryRun: boolean, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  if (!lb.binding.sweep) {
+    console.error("sweep: this binding declares no sweep config");
+    return 2;
+  }
+  const cfg = max != null ? { ...lb.binding.sweep, maxPerSweep: max } : lb.binding.sweep;
+  const r = await runSweep({ repoRoot: lb.paths.repoRoot, queuePath: lb.paths.queuePath, config: cfg, dryRun });
+  console.log(
+    `sweep: ${dryRun ? "would capture" : "captured"} ${r.appended.length}` +
+      ` (skipped ${r.skippedExisting.length} already-queued, ${r.skippedBudget.length} over budget)`,
+  );
+  for (const c of r.appended) console.log(`  + ${c.title}  [${c.source}]`);
+  if (r.skippedBudget.length) console.log(`  … ${r.skippedBudget.length} over the per-sweep cap (${cfg.maxPerSweep}); re-run after triage`);
+  if (r.backlogWarn) console.log(`  ! @needs-intake backlog is ${r.backlog} (> ${cfg.backlogWarnAt}); triage before sweeping more`);
+  return 0;
+}
+
+async function cmdIntakeList(cwd: string, asJson: boolean, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const cands = await listIntakeCandidates({
+    queuePath: lb.paths.queuePath,
+    decisionsPath: lb.paths.decisionsPath,
+    surfaces: SURFACES,
+  });
+  if (asJson) {
+    console.log(JSON.stringify(cands, null, 2));
+    return 0;
+  }
+  if (!cands.length) {
+    console.log("no @needs-intake items");
+    return 0;
+  }
+  for (const c of cands) {
+    const open = c.item.openQuestion ? `  (open: ${c.item.openQuestion})` : "";
+    console.log(`- ${c.item.title}  [areas: ${c.areas.join(", ") || "none"}]${open}`);
+  }
+  return 0;
+}
+
+async function cmdIntakeDefer(cwd: string, title: string, question: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const ok = await recordOpenQuestion(title, question, lb.paths.queuePath);
+  console.log(ok ? `deferred (needs human): ${title}\n  open-question: ${question}` : `not a needs-intake item: ${title}`);
+  return ok ? 0 : 1;
+}
+
+async function cmdEnqueueFindings(cwd: string, filePath: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const absPath = resolve(cwd, filePath);
+  const file = Bun.file(absPath);
+  if (!(await file.exists())) {
+    console.error(`enqueue-findings: file not found: ${absPath}`);
+    return 1;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await file.text());
+  } catch (e) {
+    console.error(`enqueue-findings: invalid JSON in ${absPath}: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+  const parsed = z.array(CompletableItemSchema).safeParse(raw);
+  if (!parsed.success) {
+    console.error(`enqueue-findings: schema validation failed:\n${parsed.error.message}`);
+    return 1;
+  }
+  const items = parsed.data;
+  if (items.length === 0) {
+    console.log("enqueue-findings: no items in file — nothing to do");
+    return 0;
+  }
+  const result = await enqueueFindings(items, lb.paths.queuePath);
+  const appendedItems = result.appended as Array<z.infer<typeof CompletableItemSchema> & { source: string }>;
+  const buildReadyCount = appendedItems.filter((i) => effectiveQueueStatus(i) === "unclaimed").length;
+  console.log(
+    `enqueue-findings: queued ${appendedItems.length} (${buildReadyCount} build-ready, ${appendedItems.length - buildReadyCount} need input) from ${items.length} items`,
+  );
+  for (const item of appendedItems) console.log(`  + ${item.title}  [${effectiveQueueStatus(item)}]`);
+  if (result.skippedExisting.length) console.log(`  (${result.skippedExisting.length} already present in queue — skipped)`);
+  return 0;
+}
+
+async function cmdSeedWorktree(cwd: string, workPath: string, configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const paths = lb.binding.seedPaths ?? [];
+  if (paths.length === 0) {
+    console.log("no seed paths configured");
+    return 0;
+  }
+  const r = await seedWorktree(workPath, lb.paths.repoRoot, paths);
+  for (const p of r.copied) console.log(`  ok seeded ${p}`);
+  for (const p of r.skipped) console.log(`  ~ ${p} (already present)`);
+  for (const p of r.missing) console.log(`  x ${p} (MISSING in repo root)`);
+  return r.missing.length ? 1 : 0;
+}
+
+async function cmdSpawnWorktree(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const workPath = args[0];
+  if (!workPath || workPath.startsWith("--")) {
+    usage();
+    return 2;
+  }
+  const lb = await loadBinding({ cwd, configPath });
+  const refIdx = args.indexOf("--ref");
+  const branchIdx = args.indexOf("--branch");
+  const ref = refIdx >= 0 ? args[refIdx + 1] : undefined;
+  const branch = branchIdx >= 0 ? args[branchIdx + 1] : undefined;
+  const install = !args.includes("--no-install");
+  const r = await spawnWorktree({ workPath, repoRoot: lb.paths.repoRoot, seedPaths: lb.binding.seedPaths ?? [], ref, branch, install });
+  console.log(`spawned worktree at ${r.workPath}${r.branch ? ` (branch ${r.branch})` : ""}; installed=${r.installed}`);
+  for (const p of r.seed.copied) console.log(`  ok seeded ${p}`);
+  for (const p of r.seed.missing) console.log(`  x ${p} (MISSING in repo root)`);
+  return r.seed.missing.length ? 1 : 0;
+}
+
+/** The verify gate as a verb: load the binding, run the per-surface checks (binding-derived
+ *  repoRoot + manifest path), write the manifest, exit 0/1. */
+async function cmdVerify(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const surfaceName = args.find((a) => !a.startsWith("--")) ?? getDefaultSurface();
+  const baseIdx = args.indexOf("--base");
+  const base = baseIdx >= 0 ? args[baseIdx + 1] : "HEAD";
+  const territory: string[] = [];
+  for (let i = 0; i < args.length; i++) if (args[i] === "--territory" && args[i + 1]) territory.push(args[i + 1]);
+  const json = args.includes("--json");
+  try {
+    const { manifest } = await runVerify({
+      surface: surfaceName,
+      repoRoot: lb.paths.repoRoot,
+      manifestPath: lb.paths.manifestPath,
+      base,
+      territory,
+      log: !json,
+    });
+    if (json) console.log(JSON.stringify(manifest, null, 2));
+    return manifest.ok ? 0 : 1;
+  } catch (err) {
+    console.error(`verify error: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
+}
+
 function usage(): void {
   console.log(`thebashway — autonomous Build + Fix for your repo
 
@@ -535,8 +773,25 @@ function usage(): void {
                                          ONLY trigger that stages a human-gated brief-update proposal
                                          (rate-limited, batched); never writes the brief
   thebashway audit-plan <target>         print the resolved plan (no model calls)
+  thebashway verify [<surface>] [--base <ref>] [--territory <glob>…] [--json]
+                                         run the per-surface gate (chain/freshness/required-touches/smoke)
   thebashway update                      pull the latest thebashway into this clone (git ff-only + bun install)
-  thebashway check-sync                  report drift vs the lifeofbash engine
+
+  Interactive driver verbs (drive the loop step by step in-session):
+  thebashway preflight <surface>         push + regen-commit + clean + seeds
+  thebashway claim <n> [--session <id>]  claim up to N build-ready items (prints JSON)
+  thebashway park <title> <reason…>      flip @parked + broadcast (queue / NOW / eventSink)
+  thebashway unpark-scan                 release dependents whose parent resolved
+  thebashway done <title>                mark an item @done
+  thebashway add "<title>"               capture a rough item as @needs-intake
+  thebashway mark-ready "<title>"        promote a needs-intake item to build-ready
+  thebashway sweep [--max N] [--dry-run] scan for TODO(tbw)/FIXME(tbw) → @needs-intake
+  thebashway intake-list [--json]        list @needs-intake items + assembled intake prompts
+  thebashway intake-defer "<t>" "<q>"    record an open question, keep the item @needs-intake
+  thebashway seed-worktree <path>        copy gitignored seed files into a worktree
+  thebashway spawn-worktree <path> [--ref R] [--branch B] [--no-install]
+                                         git worktree add + install + seed (ready-to-build)
+  thebashway enqueue-findings <json>     zod-validate + enqueue completable items from a directed audit
 
   Common: --config <path>  use a binding other than ./thebashway.config.ts
   Safety: tasks that reach people or destroy data are set aside for your approval.`);
@@ -555,10 +810,52 @@ export async function main(argv: string[], cwd: string): Promise<number> {
   switch (sub) {
     case "init":
       return cmdInit(cwd, args);
-    case "check-sync":
-      return cmdCheckSync();
     case "update":
       return cmdUpdate();
+    case "verify":
+      return cmdVerify(cwd, args, configPath);
+    case "preflight":
+      return args[0] && !args[0].startsWith("--") ? cmdPreflight(cwd, args[0], configPath) : (usage(), 2);
+    case "claim": {
+      const sFlag = args.indexOf("--session");
+      const session = sFlag >= 0 ? args[sFlag + 1] ?? sessionId() : sessionId();
+      const nArg = args.find((a) => /^\d+$/.test(a));
+      return cmdClaim(cwd, nArg ? Number(nArg) : 0, session, configPath);
+    }
+    case "park": {
+      const title = args[0];
+      const reason = args.slice(1).join(" ");
+      if (!title || !reason) { usage(); return 2; }
+      return cmdPark(cwd, title, reason, configPath);
+    }
+    case "unpark-scan":
+      return cmdUnparkScan(cwd, configPath);
+    case "done":
+      return args[0] ? cmdDone(cwd, args[0], configPath) : (usage(), 2);
+    case "add":
+      return args[0] ? cmdAdd(cwd, args.join(" "), configPath) : (usage(), 2);
+    case "mark-ready":
+      return args[0] ? cmdMarkReady(cwd, args.join(" "), configPath) : (usage(), 2);
+    case "sweep": {
+      const maxFlag = args.indexOf("--max");
+      const maxRaw = maxFlag >= 0 ? Number(args[maxFlag + 1]) : NaN;
+      const max = Number.isFinite(maxRaw) ? maxRaw : undefined;
+      return cmdSweep(cwd, max, args.includes("--dry-run"), configPath);
+    }
+    case "intake-list":
+      return cmdIntakeList(cwd, args.includes("--json"), configPath);
+    case "intake-defer": {
+      const title = args[0];
+      const question = args.slice(1).join(" ");
+      if (!title || !question) { usage(); return 2; }
+      return cmdIntakeDefer(cwd, title, question, configPath);
+    }
+    case "seed-worktree":
+      return args[0] ? cmdSeedWorktree(cwd, args[0], configPath) : (usage(), 2);
+    case "spawn-worktree":
+      return cmdSpawnWorktree(cwd, args, configPath);
+    case "enqueue-findings":
+      return args[0] ? cmdEnqueueFindings(cwd, args[0], configPath) : (usage(), 2);
     case "audit-plan":
       return args[0] ? cmdAuditPlan(cwd, args[0], configPath) : (usage(), 2);
     case "brief":
