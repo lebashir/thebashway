@@ -43,6 +43,14 @@ test("main audit-plan resolves + prints the plan from the injected binding", asy
   expect(code).toBe(0);
 });
 
+test("main parses --config BEFORE the subcommand (the wired `bun run thebashway <verb>` ordering)", async () => {
+  // A `bun run` script bakes `--config <path>` then bun appends the user's verb, so the shipped
+  // `bun run thebashway audit-plan money` produces config-FIRST argv. This must resolve the plan,
+  // NOT misparse `--config` as the subcommand and fall through to the bare-request classifier.
+  const code = await main(["--config", "examples/lifeofbash.config.ts", "audit-plan", "money"], process.cwd());
+  expect(code).toBe(0);
+});
+
 test("main init scaffolds a config in a fresh dir", async () => {
   const dir = mkdtempSync(join(tmpdir(), "tbw-cli-"));
   const code = await main(["init"], dir);

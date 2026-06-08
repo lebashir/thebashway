@@ -901,10 +901,14 @@ function usage(): void {
 // ---------------------------------------------------------------------------
 
 export async function main(argv: string[], cwd: string): Promise<number> {
-  const [sub, ...rest] = argv;
-  const cfgIdx = rest.indexOf("--config");
-  const configPath = cfgIdx >= 0 ? rest[cfgIdx + 1] : undefined;
-  const args = cfgIdx >= 0 ? rest.filter((_, i) => i !== cfgIdx && i !== cfgIdx + 1) : rest;
+  // Parse --config from the FULL argv BEFORE extracting the subcommand, so it works whether the flag
+  // precedes OR follows the verb. A `bun run` script bakes a fixed `--config <path>` and bun appends
+  // the user's verb AFTER it, so the wired `bun run thebashway <verb>` produces config-FIRST argv
+  // (`[--config, <path>, <verb>, …]`). Extracting `sub` first would misparse `--config` as the verb.
+  const cfgIdx = argv.indexOf("--config");
+  const configPath = cfgIdx >= 0 ? argv[cfgIdx + 1] : undefined;
+  const stripped = cfgIdx >= 0 ? argv.filter((_, i) => i !== cfgIdx && i !== cfgIdx + 1) : argv;
+  const [sub, ...args] = stripped;
 
   switch (sub) {
     case "init":
