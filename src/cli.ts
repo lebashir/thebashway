@@ -728,7 +728,9 @@ async function cmdSpawnWorktree(cwd: string, args: string[], configPath?: string
  *  repoRoot + manifest path), write the manifest, exit 0/1. */
 async function cmdVerify(cwd: string, args: string[], configPath?: string): Promise<number> {
   const lb = await loadBinding({ cwd, configPath });
-  const surfaceName = args.find((a) => !a.startsWith("--")) ?? getDefaultSurface();
+  const surfFlag = args.indexOf("--surface");
+  const surfaceName =
+    surfFlag >= 0 ? args[surfFlag + 1] ?? getDefaultSurface() : args.find((a) => !a.startsWith("--")) ?? getDefaultSurface();
   const baseIdx = args.indexOf("--base");
   const base = baseIdx >= 0 ? args[baseIdx + 1] : "HEAD";
   const territory: string[] = [];
@@ -751,6 +753,99 @@ async function cmdVerify(cwd: string, args: string[], configPath?: string): Prom
   }
 }
 
+/** IN-door directed audit as a standalone verb (the audit half of `fix`): finder bashas ->
+ *  adversarial verify -> shape -> enqueue. Lets the interactive method fill the queue, review it,
+ *  then drain selectively (the headless `fix` folds audit+drain into one). */
+async function cmdAudit(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const target = args.find((a) => !a.startsWith("--"));
+  if (!target) { usage(); return 2; }
+  const dryRun = args.includes("--dry-run");
+  const designMode = args.includes("--design");
+  const fanoutFlag = args.indexOf("--fanout");
+  const fanoutRaw = fanoutFlag >= 0 ? Number(args[fanoutFlag + 1]) : NaN;
+  const fanoutMax = Number.isFinite(fanoutRaw) ? fanoutRaw : undefined;
+  const lb = await loadBinding({ cwd, configPath });
+  tlsGuard();
+  const plan = resolveTarget(target);
+  if (dryRun) console.log("audit --dry-run: finders/verify/shape STILL run (Opus); only the queue write is skipped.");
+  if (designMode) console.log("audit --design: studying design quality (advisory -> always @needs-intake).");
+  const deps = defaultAuditDeps({
+    repoRoot: lb.paths.repoRoot,
+    decisionsPath: lb.paths.decisionsPath,
+    surface: plan.surface,
+    auditKind: designMode ? "design" : "correctness",
+    briefPath: lb.paths.briefPath,
+    notify: notifyOf(lb.binding),
+  });
+  const report = await runAudit(
+    { target, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, decisionsPath: lb.paths.decisionsPath, dryRun, fanoutMax },
+    deps,
+  );
+  console.log(`audit ${target} (${report.plan.surface}) — ${report.plan.subAreas.length} sub-areas`);
+  console.log(`  findings ${report.findingCount} -> confirmed ${report.confirmedCount} -> shaped ${report.shaped.length}`);
+  if (report.downgradedLowConfidence) console.log(`  ${report.downgradedLowConfidence} downgraded to needs-intake`);
+  if (report.droppedOverCap) console.log(`  dropped ${report.droppedOverCap} over the per-audit cap`);
+  for (const item of report.shaped) console.log(`  - ${item.title}  [${effectiveQueueStatus(item)}]`);
+  if (report.enqueued) {
+    const skip = report.enqueued.skippedExisting ? `; ${report.enqueued.skippedExisting} already present` : "";
+    console.log(`queued ${report.enqueued.appended} (${report.enqueued.buildReady} build-ready, ${report.enqueued.needInput} need input)${skip}`);
+  } else {
+    console.log(`dry-run — nothing written (would queue ${report.shaped.length})`);
+  }
+  return 0;
+}
+
+/** OUT-door drain as a standalone verb (the drain half of `fix`): preflight -> claim -> build basha
+ *  -> re-verify -> integrate -> LAND. `--no-land` stages at a green integration branch. */
+async function cmdDrain(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const nArg = args.find((a) => /^\d+$/.test(a));
+  const n = nArg ? Number(nArg) : undefined;
+  const surfaceFlag = args.indexOf("--surface");
+  const surface = surfaceFlag >= 0 ? args[surfaceFlag + 1] ?? lb.binding.defaultSurface : lb.binding.defaultSurface;
+  const sessionFlag = args.indexOf("--session");
+  const session = sessionFlag >= 0 ? args[sessionFlag + 1] ?? sessionId() : sessionId();
+  const dryRun = args.includes("--dry-run");
+  const noPreflight = args.includes("--no-preflight");
+  const autoBuild = !args.includes("--no-auto-build");
+  const land = !args.includes("--no-land");
+  const landBranchFlag = args.indexOf("--land-branch");
+  const landBranch = landBranchFlag >= 0 ? args[landBranchFlag + 1] : undefined;
+  const cfg = lb.binding.surfaces[surface];
+  if (!cfg) {
+    console.error(`unknown surface: ${surface} (configured: ${Object.keys(lb.binding.surfaces).join(", ")})`);
+    return 2;
+  }
+  tlsGuard();
+  const baseRef = await gitHead(lb.paths.repoRoot);
+  const notify = notifyOf(lb.binding);
+  const realPreflight = async (): Promise<{ ok: boolean; detail?: string }> => {
+    const s: PreflightSurface = {
+      name: surface,
+      cwd: resolve(lb.paths.repoRoot, cfg.dir),
+      repoRoot: lb.paths.repoRoot,
+      regen: cfg.regen ?? undefined,
+      derived: cfg.derived ?? [],
+      branchPattern: lb.binding.branchPattern,
+      seedPaths: lb.binding.seedPaths ?? [],
+    };
+    const r = await preflight(s);
+    return { ok: r.ok, detail: r.checks.filter((c) => !c.ok).map((c) => c.name).join(", ") || undefined };
+  };
+  const deps: DrainDeps = { ...drainDepsFor(lb, surface, baseRef, notify), preflightFn: realPreflight };
+  const report = await drain(
+    { surface, queuePath: lb.paths.queuePath, repoRoot: lb.paths.repoRoot, n, session, dryRun, noPreflight, autoBuild, land, landBranch },
+    deps,
+  );
+  console.log(JSON.stringify(report, null, 2));
+  if (report.landResult) console.log(report.landed ? `✓ ${report.landResult}` : `✗ ${report.landResult}`);
+  if (report.aborted) {
+    console.error(`drain aborted: ${report.aborted}`);
+    return 1;
+  }
+  return report.breakerTripped ? 1 : 0;
+}
+
 function usage(): void {
   console.log(`thebashway — autonomous Build + Fix for your repo
 
@@ -762,6 +857,10 @@ function usage(): void {
                                          FIX: audit a file/dir/registry target, build the findings
   thebashway build "<feature>" [--dry-run] [--no-drain]
                                          BUILD: design a new feature, then build it
+  thebashway audit <target> [--dry-run] [--fanout N] [--design]
+                                         IN-door: finder bashas -> verify -> shape -> enqueue (audit half of fix)
+  thebashway drain [N] [--surface S] [--no-land] [--dry-run] [--no-preflight] [--no-auto-build]
+                                         OUT-door: claim -> build basha -> re-verify -> integrate -> land (drain half of fix)
   thebashway "<request>"                 auto-route to build or fix
   thebashway brief                       (re)seed + print the per-project north star draft + its gaps
   thebashway run-to-goal [--target <id,…>] [--milestone <label>]
@@ -864,6 +963,10 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return cmdRunToGoal(cwd, args, configPath);
     case "reflect":
       return cmdReflect(cwd, args, configPath);
+    case "audit":
+      return cmdAudit(cwd, args, configPath);
+    case "drain":
+      return cmdDrain(cwd, args, configPath);
     case "fix":
       return cmdFix(cwd, args, configPath);
     case "build":
