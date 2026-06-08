@@ -15,6 +15,7 @@ import {
   type InitResult,
 } from "../init";
 import { loadBrief } from "../engine/load-brief";
+import { gapsOf } from "../engine/brief";
 
 function tmpRepo(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "tbw-init-"));
@@ -274,6 +275,25 @@ test("empty-repo seed => BRIEF_SEED loads but is NOT trivially terminable", asyn
   const verify = crits.find((c) => c.check.kind === "verify");
   expect(verify?.required).toBe(false);
   expect(loaded.brief!.confirmed).toBe(false);
+});
+
+test("a freshly seeded brief's gapsOf matches the kinds of gaps init recorded", async () => {
+  // seed an empty-core brief (no signals to infer core scope from) into a temp dir, then read it
+  // back and run gapsOf over the LOADED brief — the seed's field values must make gapsOf report the
+  // same missing-core + placeholder-command state init's recorded gaps describe.
+  const dir = mkdtempSync(join(tmpdir(), "tbw-seed-gaps-"));
+  mkdirSync(join(dir, ".thebashway"), { recursive: true });
+  const seededBriefPath = join(dir, ".thebashway", "brief.ts");
+  const seeded = seedBriefIfAbsent(dir, seededBriefPath);
+  expect(seeded.created).toBe(true);
+
+  const loaded = await loadBrief(seededBriefPath);
+  expect(loaded.status).toBe("ok");
+  const r = gapsOf(loaded.brief!);
+  // an empty-core seed is not core-complete and not autonomous-ready (placeholder command)
+  expect(r.coreComplete).toBe(false);
+  expect(r.autonomousReady).toBe(false);
+  expect(r.gaps).toContain("success check");
 });
 
 test("runInit populates InitResult.briefCreated/briefGaps and initMessage mentions `thebashway brief`", async () => {

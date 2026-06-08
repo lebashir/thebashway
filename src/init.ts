@@ -524,7 +524,7 @@ export function initMessage(r: InitResult): string {
   lines.push(`Detected: ${r.detect.runner}${r.detect.isNext ? " + Next.js" : ""}, chain = [${r.detect.chain.map((c) => c.name).join(", ") || "none — edit the config"}]`);
   if (r.pluginEnabled === "added") lines.push(`Enabled the thebashway plugin for this repo (${r.settingsPath}).`);
   else if (r.pluginEnabled === "malformed") lines.push(`! Couldn't parse ${r.settingsPath} — left it untouched. Enable manually: set enabledPlugins["${PLUGIN_ID}"] = true.`);
-  if (r.briefCreated) lines.push(`Drafted .thebashway/brief.ts from the repo (${r.briefGaps.length} sections to confirm). Run \`thebashway brief\`, then have the agent walk you through it.`);
+  if (r.briefCreated) lines.push(`Drafted .thebashway/brief.ts from the repo (${r.briefGaps.length} sections to confirm). Run \`thebashway brief\` and the agent will walk you through setting up your north star — you can't build or fix until it's confirmed (or pass --skip-brief).`);
   if (!r.prereqs.claude) lines.push(`! The \`claude\` command is not on your PATH — install it before running build/fix.`);
   if (!r.prereqs.git) lines.push(`! This folder is not a git repo — run \`git init\` first.`);
   if (r.prereqs.claude && r.prereqs.git) {
