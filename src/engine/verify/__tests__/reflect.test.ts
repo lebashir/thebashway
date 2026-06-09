@@ -49,8 +49,8 @@ test("per-feature land (isMilestone:false) logs a lightweight note and emits NO 
   expect(res.suppressedReason).toBe("not-a-milestone");
   // The lightweight note carries learned/onPath but NOT the proposal (stripped on the non-milestone path).
   expect(logged).toHaveLength(1);
-  expect(logged[0].proposedUpdate).toBeUndefined();
-  expect(logged[0].learned).toEqual(["the seam stayed pure"]);
+  expect(logged[0]!.proposedUpdate).toBeUndefined();
+  expect(logged[0]!.learned).toEqual(["the seam stayed pure"]);
 });
 
 test("explicit milestone with a proposal stages a SINGLE park (prose + conventions + glossary BATCHED)", async () => {
@@ -71,12 +71,12 @@ test("explicit milestone with a proposal stages a SINGLE park (prose + conventio
   expect(res.parked).toBe(true);
   // ONE park entry for the whole batch — NOT one per term/convention (spec 5.5).
   expect(parks).toHaveLength(1);
-  expect(parks[0].title).toBe(BRIEF_UPDATE_PARK_TITLE);
+  expect(parks[0]!.title).toBe(BRIEF_UPDATE_PARK_TITLE);
   // All deltas are folded into the single reason.
-  expect(parks[0].reason).toContain("tighten the scope line");
-  expect(parks[0].reason).toContain("land via the green gate");
-  expect(parks[0].reason).toContain("park=stage a question, keep going");
-  expect(parks[0].reason).toContain("drain=build the queue");
+  expect(parks[0]!.reason).toContain("tighten the scope line");
+  expect(parks[0]!.reason).toContain("land via the green gate");
+  expect(parks[0]!.reason).toContain("park=stage a question, keep going");
+  expect(parks[0]!.reason).toContain("drain=build the queue");
 });
 
 test("milestone with NOTHING proposed logs but does not park", async () => {

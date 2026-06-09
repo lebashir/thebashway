@@ -172,7 +172,7 @@ test("confidence floor: a confirmed-but-below-buildready finding is downgraded t
   expect(report.confirmedCount).toBe(1);
   expect(report.downgradedLowConfidence).toBe(1);
   const items = await readItems(p);
-  expect(items[0].status).toBe("needs-intake"); // forced down, not build-ready
+  expect(items[0]!.status).toBe("needs-intake"); // forced down, not build-ready
   cleanup(p);
 });
 
@@ -187,7 +187,7 @@ test("freeze-unsafe / open-question findings enqueue as needs-intake (effectiveQ
     }),
   );
   const items = await readItems(p);
-  expect(items[0].status).toBe("needs-intake"); // freezeSafe:false forced down by enqueueFindings
+  expect(items[0]!.status).toBe("needs-intake"); // freezeSafe:false forced down by enqueueFindings
   cleanup(p);
 });
 
@@ -305,7 +305,7 @@ test("parseFindings: validates, defaults the subArea, drops malformed entries", 
     "\n```";
   const findings = parseFindings(out, "default/sub/**");
   expect(findings.length).toBe(1);
-  expect(findings[0].subArea).toBe("default/sub/**");
+  expect(findings[0]!.subArea).toBe("default/sub/**");
 });
 
 test("parseFindings: malformed JSON → [] (never throws)", () => {
@@ -326,7 +326,7 @@ test("parseVerdicts: aligns by index and default-refutes any missing index", () 
 test("parseVerdicts: unparseable → all default-refuted", () => {
   const findings = [{ title: "F0", description: "d", subArea: "s", confidence: 0.9, freezeSafe: true }];
   const v = parseVerdicts("garbage", findings);
-  expect(v[0].isReal).toBe(false);
+  expect(v[0]!.isReal).toBe(false);
 });
 
 test("parseShaped: validates a single CompletableItem object, else null", () => {

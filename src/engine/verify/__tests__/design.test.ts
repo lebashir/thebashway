@@ -51,7 +51,7 @@ function cleanup(p: string) {
 }
 
 function fd(over: Partial<FeatureDesign> = {}): FeatureDesign {
-  return { surface: "tools", surfaceRationale: "an automation", title: "Feature X", summary: "does X", openQuestions: [], ...over };
+  return { surface: "tools", surfaceRationale: "an automation", title: "Feature X", summary: "does X", openQuestions: [], ...over, affectsTerritory: over.affectsTerritory ?? [] };
 }
 function ci(over: Partial<CompletableItem> = {}): CompletableItem {
   return {
@@ -132,7 +132,6 @@ function stubDeps(c: StubControl) {
     },
     async notify(t) {
       calls.notify.push(t);
-      return true;
     },
     ...(c.loadBrief
       ? {

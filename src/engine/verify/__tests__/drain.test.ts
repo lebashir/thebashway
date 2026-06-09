@@ -88,7 +88,6 @@ function mkDeps(over: Partial<DrainDeps>, calls: Calls): DrainDeps {
     assertCleanFn: async () => ({ ok: true }),
     notify: async (text) => {
       calls.notify.push(text);
-      return true;
     },
     landFn: async (integrationBranch, landBranch) => {
       calls.land.push(`${integrationBranch}->${landBranch}`);
@@ -221,9 +220,9 @@ test("integration re-verify failure with mis-slice → @blocked + Loop B lesson"
     ),
   );
   expect(report.succeeded).toEqual([]);
-  expect(report.blocked[0].item).toBe("Delta");
+  expect(report.blocked[0]!.item).toBe("Delta"); // 1 blocked item from the scope-conflict path
   expect(calls.lessons.length).toBe(1);
-  expect(calls.lessons[0].toLowerCase()).toContain("mis-slice");
+  expect(calls.lessons[0]!.toLowerCase()).toContain("mis-slice"); // length asserted above
   cleanup(p);
 });
 
@@ -595,7 +594,7 @@ test("Loop B: a basha-emitted LESSON on a BLOCKED build is routed (item still @b
     base(p),
     mkDeps({ runBasha: async (_item, ctx) => ({ ok: false, branch: ctx.branch, reason: "stuck", lesson: "[tools] the API needs Z first" }) }, calls),
   );
-  expect(report.blocked[0].item).toBe("Lc2");
+  expect(report.blocked[0]!.item).toBe("Lc2"); // 1 blocked item from the sticky-lesson path
   expect(calls.lessons).toEqual(["[tools] the API needs Z first"]); // routed once (not per retry)
   cleanup(p);
 });
@@ -608,8 +607,8 @@ test("Loop B: a unit verify failure synthesizes a [<surface>]-tagged lesson", as
     mkDeps({ verifyUnit: async () => ({ ok: false, manifestHash: "-", reason: "red" }) }, calls),
   );
   expect(calls.lessons.length).toBe(1);
-  expect(calls.lessons[0].startsWith("[tools]")).toBe(true); // surface tag → actually feeds forward
-  expect(calls.lessons[0]).toContain("self-check"); // unique to the verify-fail synth (not the integration one)
+  expect(calls.lessons[0]!.startsWith("[tools]")).toBe(true); // surface tag → actually feeds forward
+  expect(calls.lessons[0]!).toContain("self-check"); // unique to the verify-fail synth (not the integration one)
   cleanup(p);
 });
 
@@ -621,8 +620,8 @@ test("Loop B: a non-mis-slice integration failure synthesizes a [<surface>]-tagg
     mkDeps({ integrateUnit: async () => ({ ok: false, reason: "boom" }) }, calls), // misSlice falsy
   );
   expect(calls.lessons.length).toBe(1);
-  expect(calls.lessons[0].startsWith("[tools]")).toBe(true);
-  expect(calls.lessons[0]).toContain("failed to integrate");
+  expect(calls.lessons[0]!.startsWith("[tools]")).toBe(true); // length asserted above
+  expect(calls.lessons[0]!).toContain("failed to integrate");
   cleanup(p);
 });
 
@@ -634,8 +633,8 @@ test("Loop B: the mis-slice lesson is re-tagged to the surface (keeps the `mis-s
     mkDeps({ integrateUnit: async () => ({ ok: false, reason: "scope conflict", misSlice: true }) }, calls),
   );
   expect(calls.lessons.length).toBe(1);
-  expect(calls.lessons[0].startsWith("[tools]")).toBe(true); // was [integration] (never fed forward)
-  expect(calls.lessons[0].toLowerCase()).toContain("mis-slice");
+  expect(calls.lessons[0]!.startsWith("[tools]")).toBe(true); // was [integration] (never fed forward)
+  expect(calls.lessons[0]!.toLowerCase()).toContain("mis-slice"); // length asserted above
   cleanup(p);
 });
 

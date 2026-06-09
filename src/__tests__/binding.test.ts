@@ -12,7 +12,7 @@ const minimal = {
 test("defineThebashway validates and resolves defaults", () => {
   const b = defineThebashway(minimal);
   expect(b.defaultSurface).toBe("app");
-  expect(b.surfaces.app.chain[0].name).toBe("test");
+  expect(b.surfaces.app!.chain[0]!.name).toBe("test"); // app surface defined in minimal fixture
   // defaults filled in:
   expect(b.branchPattern).toBe("tbw/*");
   expect(b.breaker).toEqual({ maxFailures: 2, window: 3 });

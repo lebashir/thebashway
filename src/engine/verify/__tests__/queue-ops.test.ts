@@ -37,8 +37,8 @@ test("claimNext claims exactly the first unclaimed item and persists", async () 
   expect(claimed?.title).toBe("A");
   expect(claimed?.claim).toEqual({ session: "sess1", branch: "br1" });
   const items = await readItems(p);
-  expect(items[0].status).toBe("claimed");
-  expect(items[1].status).toBe("unclaimed");
+  expect(items[0]!.status).toBe("claimed");
+  expect(items[1]!.status).toBe("unclaimed");
   unlinkSync(p);
 });
 
@@ -67,8 +67,8 @@ test("claimNextN claims up to N claim-able items at once with per-item branches"
   const p = seed();
   const claimed = await claimNextN(5, "s", (it) => `br-${it.title}`, p);
   expect(claimed.map((i) => i.title)).toEqual(["A", "B"]);
-  expect(claimed[0].claim).toEqual({ session: "s", branch: "br-A" });
-  expect(claimed[1].claim).toEqual({ session: "s", branch: "br-B" });
+  expect(claimed[0]!.claim).toEqual({ session: "s", branch: "br-A" });
+  expect(claimed[1]!.claim).toEqual({ session: "s", branch: "br-B" });
   // A third call returns empty (both claimed).
   const empty = await claimNextN(2, "s", (it) => `br-${it.title}`, p);
   expect(empty).toEqual([]);
@@ -162,8 +162,8 @@ test("ensureParkItem is a no-op when an item with that title already exists (any
   expect(created).toBe(false);
   const matches = (await readItems(p)).filter((i) => i.title === "A");
   expect(matches).toHaveLength(1);
-  expect(matches[0].status).toBe("parked"); // unchanged by the no-op ensure
-  expect(matches[0].parkReason).toBe("prior");
+  expect(matches[0]!.status).toBe("parked"); // unchanged by the no-op ensure
+  expect(matches[0]!.parkReason).toBe("prior");
   unlinkSync(p);
 });
 
@@ -191,7 +191,7 @@ test("markReady promotes needs-intake to unclaimed", async () => {
   await Bun.write(p, `# build queue\n\n${serializeItem(it)}`);
   expect(await markReady("Rough", p)).toBe(true);
   const items = await parseQueue(await Bun.file(p).text());
-  expect(items[0].status).toBe("unclaimed");
+  expect(items[0]!.status).toBe("unclaimed");
   unlinkSync(p);
 });
 

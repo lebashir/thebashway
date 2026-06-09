@@ -7,10 +7,10 @@ test("both surfaces are configured", () => {
 });
 
 test("organs build fires prebuild (real pnpm build, not next build)", () => {
-  const build = SURFACES.organs.chain.find((c) => c.name === "build");
+  const build = SURFACES.organs!.chain.find((c) => c.name === "build"); // key present in this fixture
   expect(build?.cmd).toEqual(["pnpm", "build"]);
 });
 
 test("tools carries the Tabby bun-TLS workaround", () => {
-  expect(SURFACES.tools.env?.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
+  expect(SURFACES.tools!.env?.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0"); // key present in this fixture
 });
