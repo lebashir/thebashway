@@ -34,8 +34,8 @@ test("scanForTodos captures only the (tbw)-flagged marker, not bare TODO/FIXME",
   const c = scanForTodos(files, RE);
   expect(c.map((x) => x.title)).toEqual(["wire the sweep", "clamp this"]);
   expect(c.every((x) => x.origin === "auto")).toBe(true);
-  expect(c[0].source).toBe(fingerprint("a.ts", "wire the sweep"));
-  expect(c[0].goal).toContain("a.ts:1");
+  expect(c[0]!.source).toBe(fingerprint("a.ts", "wire the sweep")); // provably present: scanForTodos returned 2 items
+  expect(c[0]!.goal).toContain("a.ts:1");
 });
 
 test("fingerprint ignores line, whitespace, comment-prefix + case; file + wording matter", () => {
@@ -53,9 +53,9 @@ test("normalizeMarkerText strips trailing comment closers", () => {
 test("the same marker moving down a file keeps its fingerprint (line lives in goal, not source)", () => {
   const a = scanForTodos([{ path: "f.ts", text: "// TODO(tbw): same" }], RE);
   const b = scanForTodos([{ path: "f.ts", text: "\n\n\n// TODO(tbw): same" }], RE);
-  expect(a[0].source).toBe(b[0].source);
-  expect(a[0].goal).toContain("f.ts:1");
-  expect(b[0].goal).toContain("f.ts:4");
+  expect(a[0]!.source).toBe(b[0]!.source); // both arrays have exactly 1 item
+  expect(a[0]!.goal).toContain("f.ts:1");
+  expect(b[0]!.goal).toContain("f.ts:4");
 });
 
 test("dedupeBySource collapses identical fingerprints, keeps first", () => {
@@ -79,7 +79,7 @@ test("gatherSignals walks scanGlobs, honours excludeGlobs, returns repo-relative
   const cfg: SweepConfig = { ...SWEEP, scanGlobs: ["tools/**/*.ts"] };
   const c = await gatherSignals({ repoRoot: root, config: cfg });
   expect(c.map((x) => x.title)).toEqual(["keep me"]);
-  expect(c[0].source).toContain("tools/keep.ts");
+  expect(c[0]!.source).toContain("tools/keep.ts"); // provably present: 1 non-excluded file written
   await rm(root, { recursive: true, force: true });
 });
 
@@ -112,9 +112,9 @@ test("scanForWrapUpCandidates harvests only engineering-flavored bullets (drops 
   ];
   const c = scanForWrapUpCandidates(files, signal);
   expect(c).toHaveLength(2); // the two engineering occurrences (dedupe happens later)
-  expect(c[0].title).toContain("smoke test is flaky");
-  expect(c[0].source.startsWith("wrapup:")).toBe(true);
-  expect(c[0].source).toBe(c[1].source); // identical text → identical fingerprint
+  expect(c[0]!.title).toContain("smoke test is flaky"); // 2 items returned, index 0 provably present
+  expect(c[0]!.source.startsWith("wrapup:")).toBe(true);
+  expect(c[0]!.source).toBe(c[1]!.source); // identical text → identical fingerprint
   expect(c.every((x) => x.origin === "auto")).toBe(true);
   expect(dedupeBySource(c)).toHaveLength(1); // cross-session duplication collapses
 });
@@ -128,7 +128,7 @@ test("scanForWrapUpCandidates skips a leading YAML frontmatter block (no list-it
   ];
   const c = scanForWrapUpCandidates(files, SWEEP.wrapUpSignal);
   expect(c).toHaveLength(1); // the frontmatter `- bug` line is NOT harvested
-  expect(c[0].title).toContain("fix the flaky test");
+  expect(c[0]!.title).toContain("fix the flaky test"); // 1 item returned (frontmatter bullet excluded)
 });
 
 test("gatherSignals merges TODO markers and engineering wrap-up bullets; drops life bullets", async () => {

@@ -125,7 +125,6 @@ function mkHarness(cfg: {
     },
     notify: async (t) => {
       notifies.push(t);
-      return true;
     },
     emitPark: async (title, reason) => {
       parks.push({ title, reason });
@@ -135,7 +134,7 @@ function mkHarness(cfg: {
       if (!seq) return 0;
       const v = seq[Math.min(nowIdx, seq.length - 1)];
       nowIdx++;
-      return v;
+      return v ?? 0; // index is clamped to seq.length-1, so v is always defined
     },
   };
 
@@ -169,7 +168,7 @@ test("omitted targetCriteria + full required pass after a drain => 'goal-fully-m
     { r1: false, r2: false, opt: false }, // entry eval
     { r1: true, r2: true, opt: false }, // after drain 1
   ];
-  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)] });
+  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)]! }); // clamped index is always in-bounds
   const r = await runToGoal(baseOpts(), h.deps);
   expect(r.reason).toBe("goal-fully-met");
   expect(r.goalMet).toBe(true);
@@ -177,8 +176,8 @@ test("omitted targetCriteria + full required pass after a drain => 'goal-fully-m
   expect(r.failingRequired).toEqual([]);
   expect(h.drainCalls.length).toBe(1);
   // the drain pass threaded the early-stop seam + the full required target.
-  expect(h.drainCalls[0].stopWhenBriefMet).toBe(true);
-  expect(h.drainCalls[0].targetCriteria?.sort()).toEqual(["r1", "r2"]);
+  expect(h.drainCalls[0]!.stopWhenBriefMet).toBe(true); // length asserted above
+  expect(h.drainCalls[0]!.targetCriteria?.sort()).toEqual(["r1", "r2"]);
 });
 
 test("explicit targetCriteria:[] => refuse-to-run, no spin, 'target-has-no-required-criterion'", async () => {
@@ -195,7 +194,7 @@ test("strict-subset slice met => 'target-slice-met' (NOT goal-fully-met); notify
     { r1: false, r2: false, opt: false },
     { r1: true, r2: false, opt: false },
   ];
-  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)] });
+  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)]! }); // clamped index is always in-bounds
   const r = await runToGoal(baseOpts({ targetCriteria: ["r1"] }), h.deps);
   expect(r.reason).toBe("target-slice-met");
   expect(r.reason).not.toBe("goal-fully-met");
@@ -273,7 +272,7 @@ test("unconfirmed brief => 'brief-unconfirmed', count-bounded, never terminates 
   expect(r.goalMet).toBe(false);
   // count-bounded fallback ran ONE drain (no early-stop seam).
   expect(h.drainCalls.length).toBe(1);
-  expect(h.drainCalls[0].stopWhenBriefMet).toBeUndefined();
+  expect(h.drainCalls[0]!.stopWhenBriefMet).toBeUndefined(); // length asserted above
   expect(h.notifies.join(" ")).toMatch(/unconfirmed/i);
 });
 
@@ -282,7 +281,7 @@ test("unparseable brief => loud signal (emitPark + notify), NO run", async () =>
   const r = await runToGoal(baseOpts(), h.deps);
   expect(r.goalMet).toBe(false);
   expect(h.parks.length).toBe(1);
-  expect(h.parks[0].title).toMatch(/unparseable/i);
+  expect(h.parks[0]!.title).toMatch(/unparseable/i); // length asserted above
   expect(h.drainCalls.length).toBe(0); // NO run
 });
 
@@ -333,7 +332,7 @@ test("generic cap-hit (failing-required CHANGES across the run) => the GENERIC n
     { r1: true, r2: false, opt: false }, // after drain2: [r2]
     { r1: false, r2: false, opt: false }, // after drain3: [r1, r2]
   ];
-  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)] });
+  const h = mkHarness({ passing: (round) => rounds[Math.min(round, rounds.length - 1)]! }); // clamped index is always in-bounds
   const r = await runToGoal(baseOpts({ targetCriteria: ["r1", "r2"], maxIterations: 3 }), h.deps);
   expect(r.reason).toBe("cap-hit");
   expect(h.notifies.some((n) => /unsatisfiable|over-specified/i.test(n))).toBe(false);
@@ -363,7 +362,7 @@ test("INV-A: runToGoal performs ZERO writes to briefPath across all paths (spy t
     await runToGoal(
       baseOpts(),
       mkHarness({
-        passing: (round) => [{ r1: false, r2: false, opt: false }, { r1: true, r2: true, opt: false }][Math.min(round, 1)],
+        passing: (round) => [{ r1: false, r2: false, opt: false }, { r1: true, r2: true, opt: false }][Math.min(round, 1)]!, // clamped index is always in-bounds
       }).deps,
     );
     // milestone park path
