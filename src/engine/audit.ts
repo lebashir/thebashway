@@ -203,6 +203,20 @@ export function resolveTarget(target: string): AuditPlan {
     return AuditPlanSchema.parse(registryEntry);
   }
 
+  // 1b. Surface-name target: audit the whole of a configured surface BY NAME (e.g. "engine",
+  //     "tools"). A bare surface name is not ".", not a registry key, and (for a root surface,
+  //     dir ".") not a path with "/", so it would otherwise hit the throw below — but run-to-goal's
+  //     work-bridge legitimately targets a failing criterion's surface by name.
+  const surfaceCfg = SURFACES[trimmed];
+  if (surfaceCfg) {
+    const dir = surfaceCfg.dir;
+    return AuditPlanSchema.parse({
+      surface: trimmed,
+      rootGlob: dir === "." ? "**" : `${dir}/**`,
+      subAreas: genericSubAreasSync(dir),
+    });
+  }
+
   // 2. Directory target: a path containing "/", OR a bare name that is an existing
   //    directory in the repo (so `fix lib` works, not only `fix lib/foo`). Trailing
   //    slashes are stripped so `fix lib/` never yields a `lib//**` glob.

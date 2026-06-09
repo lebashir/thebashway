@@ -28,6 +28,9 @@ export interface RunToGoalOptions {
   queuePath: string;
   repoRoot: string;
   briefPath: string;
+  /** The Loop-A decisions file, threaded into the work-bridge audit (so its intake injects the
+   *  repo's decisions). Optional for back-compat with fakes; the CLI always supplies it. */
+  decisionsPath?: string;
   /** PART-OR-ALL TARGETING (spec 5.4). A subset of the brief's successCriteria ids to drive
    *  toward. DEFAULT (undefined) = ALL required ids. Validated against real criterion ids (an
    *  unknown id is a typed terminal reason, never a silent drop); reduced over by `goalMet`;
@@ -379,10 +382,14 @@ async function runOneCountBoundedDrain(opts: RunToGoalOptions, deps: RunToGoalDe
  * (the real wiring overrides via drainOpts if a project co-locates decisions elsewhere). */
 function buildAuditOpts(opts: RunToGoalOptions): AuditOptions {
   return {
+    // The surface BY NAME — resolveTarget resolves a configured surface name to its whole area
+    // (a bare surface name is otherwise not a path/registry key for a root-surface repo).
     target: opts.surface,
     queuePath: opts.queuePath,
     repoRoot: opts.repoRoot,
-    decisionsPath: opts.repoRoot,
+    // The real decisions file (Loop A), not the repo root. Falls back to repoRoot only when a
+    // caller omits it (fakes in tests); the CLI always threads the binding's decisions path.
+    decisionsPath: opts.decisionsPath ?? opts.repoRoot,
   };
 }
 

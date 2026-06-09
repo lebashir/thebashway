@@ -51,6 +51,15 @@ test("resolveTarget('.') maps to the default surface (whole-repo audit)", () => 
   expect(plan.subAreas.length).toBeGreaterThan(0);
 });
 
+test("resolveTarget accepts a SURFACE NAME → audits that whole surface (the run-to-goal work-bridge target)", () => {
+  // run-to-goal's work-bridge audits a failing criterion's surface BY NAME ("app"/"engine"/…).
+  // A bare surface name is not "." , not a registry key, and (dir ".") not a path with "/" — so it
+  // must resolve via the surface map, not throw.
+  const plan = resolveTarget("app");
+  expect(plan.surface).toBe("app");
+  expect(plan.subAreas.length).toBeGreaterThan(0);
+});
+
 test("getRepoRoot reflects the injected binding", () => {
   expect(getRepoRoot()).toBe("/tmp/nextjs-app");
 });

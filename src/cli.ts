@@ -444,6 +444,7 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
       queuePath: lb.paths.queuePath,
       repoRoot: lb.paths.repoRoot,
       briefPath: lb.paths.briefPath,
+      decisionsPath: lb.paths.decisionsPath,
       targetCriteria,
       // `--no-land`: each iteration's drain stages at its green integration branch instead of
       // merging to main + pushing (parity with fix/build/drain). Threaded via drainOpts.land,
