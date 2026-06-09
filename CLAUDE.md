@@ -28,6 +28,9 @@ engine can't ride inside the plugin.
   fails with TS2688 (missing bun types), not real errors. Ignore TS2688 noise; it is not a bug.
 - **No build step.** `package.json` `exports` point straight at `.ts` (`./src/index.ts`,
   `./src/binding.ts`); consumers run the source under Bun.
+- **CI:** `.github/workflows/ci.yml` runs `bun install --frozen-lockfile` + `bun test` on every
+  PR and push to `main`. It mirrors the green gate — `tsc` is intentionally absent for the same
+  TS2688 reason. Bump the pinned `bun-version` when you bump Bun locally.
 
 ## Architecture map
 
