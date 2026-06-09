@@ -50,11 +50,11 @@ test("listIntakeCandidates returns only @needs-intake items with an assembled Lo
 
   const cands = await listIntakeCandidates({ queuePath: qp, decisionsPath: dp, surfaces: SURFACES });
   expect(cands).toHaveLength(1); // the @unclaimed item is excluded
-  expect(cands[0].item.title).toBe("Rough");
-  expect(cands[0].areas).toEqual(["tools"]);
-  expect(cands[0].intakePrompt).toContain("Prefer the lean option"); // global [decision] injected
-  expect(cands[0].intakePrompt).toContain("Some tools rule"); // area [tools] injected
-  expect(cands[0].intakePrompt).toContain("Title: Rough");
+  expect(cands[0]!.item.title).toBe("Rough");
+  expect(cands[0]!.areas).toEqual(["tools"]);
+  expect(cands[0]!.intakePrompt).toContain("Prefer the lean option"); // global [decision] injected
+  expect(cands[0]!.intakePrompt).toContain("Some tools rule"); // area [tools] injected
+  expect(cands[0]!.intakePrompt).toContain("Title: Rough");
   unlinkSync(qp);
   unlinkSync(dp);
 });
