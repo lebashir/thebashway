@@ -4,7 +4,7 @@
 // "thebashway" package name, which does not resolve INSIDE the engine repo, so this uses
 // a relative import like the examples/. One `engine` surface over the Bun/TS source.
 //
-// Verify chain is `[test]` only — `bun test` (286 pass) is the green gate. Standalone
+// Verify chain is `[test]` only — `bun test` is the green gate. Standalone
 // `tsc --noEmit` is deliberately NOT in the chain: the repo runs on Bun's transpile-time
 // checking and does not install `@types/bun`, so `bunx tsc` fails on TS2688 (missing bun
 // types), not on real errors. Run `bunx tsc --noEmit` by hand if you want a typecheck pass.

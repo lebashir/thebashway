@@ -8,9 +8,11 @@ and settings reference.
 | Command | What it does |
 |---|---|
 | `thebashway init [--global <path>] [--no-enable-plugin]` | Detect how the repo builds, write `thebashway.config.ts` + a `.thebashway/` store, and **enable the plugin for this repo** (merges `enabledPlugins` into `.claude/settings.json`, preserving the rest). `--global` points the shared lessons file at a cross-project store. `--no-enable-plugin` skips the enable (e.g. if you installed the method via `install.sh`). |
-| `thebashway fix <target> [--dry-run] [--no-land] [--skip-brief]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--no-land` stops at a green branch instead of merging + deploying. **Requires a confirmed north-star brief** (the brief-first gate) unless `--skip-brief` or `requireBrief:false`. |
+| `thebashway fix <target> [--dry-run] [--design] [--no-land] [--skip-brief]` | **Fix Mode.** Audit a target (a file, a folder path, or a registered name), then build the findings. Builds AND deploys by default. `--dry-run` audits without building. `--design` audits for design-quality issues instead of correctness (advisory — always set aside for review). `--no-land` stops at a green branch instead of merging + deploying. **Requires a confirmed north-star brief** (the brief-first gate) unless `--skip-brief` or `requireBrief:false`. |
 | `thebashway build "<feature>" [--dry-run] [--no-drain] [--no-land] [--skip-brief]` | **Build Mode.** Design → decompose → safety-gate → build a small feature, then deploy it by default. `--dry-run` designs + prints only. `--no-drain` enqueues without building. `--no-land` builds + integrates but stages instead of deploying. **Requires a confirmed brief** unless `--skip-brief` / `requireBrief:false`. |
 | `thebashway "<request>"` | Auto-route the request to Build or Fix (inherits the brief-first gate). |
+| `thebashway audit <target> [--dry-run] [--fanout N] [--design]` | **IN door — the audit half of `fix`, as a standalone verb.** Fan out finder bashas over a target → adversarially verify → shape → **enqueue** completable items; does NOT build. Lets the interactive method fill the queue, review it, then `drain` selectively. `--dry-run` still runs the finders/verify/shape (Opus) — only the queue write is skipped. `--fanout N` caps the finder fan-out; `--design` runs design-quality finders (advisory → always `@needs-intake`). |
+| `thebashway drain [N] [--surface S] [--no-land] [--dry-run] [--no-preflight] [--no-auto-build] [--session id] [--land-branch b]` | **OUT door — the drain half of `fix`, as a standalone verb.** Work the queue: preflight → claim up to N build-ready items → build basha → re-verify → integrate → **land** (merge to your main branch + deploy). `--no-land` stages at a green integration branch. `--no-auto-build` claims + integrates without spawning a build basha. A circuit breaker halts the loop after too many failures in a row. |
 | `thebashway brief` | **North star — status + draft.** (Re)draft the per-project design brief from repo signals if missing, then print its readiness in plain language: confirmed or draft, the gaps still to fill, whether it's autonomous-ready, and the next step. The brief is the project's living definition: purpose, who it serves, in/out-of-scope surfaces, conventions/glossary, and machine-checkable success criteria. It guides every build/fix/audit and is the goal-set `run-to-goal` drives toward. The conversational interview that fills the gaps runs in the agent (the plugin skill); the brief is written only by you (or the interview), never silently by the engine. |
 | `thebashway brief write --from <file>` | **The interview's writer (agent-facing).** Validate a JSON brief payload at the boundary (zod) and write `brief.ts` — partial save (`confirmed:false`) or final (`confirmed:true`). Refuses a malformed payload or a premature confirm (a Ring-1 core field still empty). This is how the agent persists the interview without hand-editing TypeScript; you rarely type it yourself. |
 | `thebashway run-to-goal [--target <id,…>] [--skip-brief]` | **Autonomous to a goal.** Loop build→check→repeat until the brief's success criteria are met, then stop. `--target` aims at a *slice* of the criteria (PART); omitted drives **all required** criteria (ALL). Bounded by required caps (`maxIterations` default 5, a wall-clock backstop, and a build-spend ceiling) + a no-progress stall stop. Refuses to terminate on an **unconfirmed** brief; reports `goal-fully-met` only for the whole star vs `target-slice-met` for a slice; any open **milestone** parks for you instead of declaring done. |
@@ -27,7 +29,8 @@ A `target` for `fix`/`audit-plan` is either a **registered name** (a key in
 
 ## The settings file (`thebashway.config.ts`)
 
-`init` writes this; you usually only touch `surfaces.*.chain`. Full shape:
+`init` writes this; you usually only touch `surfaces.*.chain`. The common shape (the
+optional fields listed after it cover the rest):
 
 ```ts
 import { defineThebashway } from "thebashway/binding";
@@ -80,6 +83,21 @@ export default defineThebashway({
   seedPaths: [],                  // gitignored files a worktree needs (e.g. .env.local)
 });
 ```
+
+**Other optional fields** (omitted above for clarity; each has a safe default):
+
+- `auditTargets` — named IN-door fan-out partitions for Fix Mode: `{ surface, rootGlob,
+  subAreas }`. A `fix`/`audit` target can be one of these names instead of a path.
+- `surfaces.*.env` — extra env applied to that surface's chain commands.
+- `surfaces.*.requiredTouches` — mechanical completeness rules: when a change matches one glob,
+  require a matching change elsewhere (e.g. touch a route → touch its smoke list).
+- `branchPattern` — the work-branch prefix (default `tbw/*`).
+- `designBar` — a project design-system bar injected into UI build / design-audit prompts. Supply
+  it so build bashas extend your design system instead of the generic default.
+- `sweep` — Stage-2 capture-sweep config: harvest `TODO(tbw)`/`FIXME(tbw)` markers into the queue
+  (`scanGlobs`, `excludeGlobs`, `markerRegex`, `maxPerSweep`, `backlogWarnAt`, …).
+- `paths` — override the default `.thebashway/*` loop-data locations (`queue`, `runLog`, `now`,
+  `manifest`) for a repo that keeps them elsewhere.
 
 ## The safety rails
 
