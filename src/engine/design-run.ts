@@ -59,8 +59,8 @@ export interface DesignDeps {
   runDrainStaged(surface: string, n: number, allowTitles: string[]): Promise<DrainReport>;
   /** Land a staged integration branch → main + push (deploy). Reuses drain's land logic. */
   landIntegration(integrationBranch: string, landBranch: string): Promise<{ ok: boolean; reason?: string }>;
-  /** Single combined Telegram (or any) digest. */
-  notify(text: string): Promise<boolean>;
+  /** Single combined Telegram (or any) digest. Fire-and-forget (matches the Notify sink). */
+  notify(text: string): Promise<void>;
 }
 
 export interface DesignOptions {
@@ -461,7 +461,7 @@ export function parseDesignReview(stdout: string): DesignReview | null {
 export function defaultDesignDeps(cfg: {
   repoRoot: string;
   decisionsPath: string;
-  notify: (text: string) => Promise<boolean>;
+  notify: (text: string) => Promise<void>;
   runDrainStaged: (surface: string, n: number, allowTitles: string[]) => Promise<DrainReport>;
   landIntegration: (integrationBranch: string, landBranch: string) => Promise<{ ok: boolean; reason?: string }>;
   /** The per-project north star path. Threaded into the design/decompose intake prompts as the

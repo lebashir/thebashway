@@ -86,8 +86,9 @@ export interface DrainDeps {
   teardownWorktree(worktree: string, branch: string): Promise<void>;
   /** Leave-no-trace assertion for the unit's own branch (NOT the integration branch). */
   assertCleanFn(unitBranch: string): Promise<{ ok: boolean; detail?: string }>;
-  /** Telegram (or any) notifier; no-op default keeps the core layer-clean. */
-  notify(text: string): Promise<boolean>;
+  /** Telegram (or any) notifier; no-op default keeps the core layer-clean. Fire-and-forget —
+   *  the return is unused, so this matches the binding's Notify sink (Promise<void>). */
+  notify(text: string): Promise<void>;
   /** Land the run when done: merge the integration branch into the land branch (main)
    * and push — pushing main auto-deploys organs via Vercel. The integration branch is
    * already smoke-verified by the loop, so this is post-smoke (rails-compliant). Returns
@@ -493,7 +494,7 @@ export function defaultDrainDeps(cfg: {
   surface: string;
   repoRoot: string;
   baseRef: string; // the run's base (pre-merge HEAD) for per-unit verify
-  notify: (text: string) => Promise<boolean>;
+  notify: (text: string) => Promise<void>;
   seedPaths: string[];
   runLogPath: string;
   lessonsPath: string;

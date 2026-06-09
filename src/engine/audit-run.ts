@@ -309,7 +309,7 @@ export function defaultAuditDeps(cfg: {
   briefPath?: string;
   /** Optional loud-signal sink for an unparseable brief surfaced while shaping (the §3.1 single
    * signal). Absent/ok stay benign. */
-  notify?: (text: string) => Promise<boolean> | void;
+  notify?: (text: string) => Promise<void> | void;
 }): AuditDeps {
   const designMode = cfg.auditKind === "design";
   // The §3.1 loud signal is emitted at most ONCE per audit run even though runShape is called per

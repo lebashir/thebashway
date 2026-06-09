@@ -433,7 +433,7 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
           notify,
         }),
       ),
-    notify: (text) => notify(text).then(() => true),
+    notify,
     emitPark: emitParkFor(lb),
     now: Date.now,
   };

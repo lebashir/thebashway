@@ -85,7 +85,7 @@ export interface RunToGoalDeps {
   /** The work-bridge: ONE targeted audit pass at the failing target criteria's surface(s). */
   runAudit(opts: AuditOptions): Promise<AuditReport>;
   /** Human notifier (Telegram/event sink). */
-  notify(text: string): Promise<boolean> | void;
+  notify(text: string): Promise<void> | void;
   /** Park a brief-update / stop-and-ask for the human (spec 4.3 human-gate). */
   emitPark(title: string, reason: string): Promise<void>;
   /** Injectable wall-clock. Default Date.now in the real wiring; tests control time. */
