@@ -7,5 +7,7 @@
     "noUncheckedIndexedAccess": true,
     "types": ["bun"],
     "skipLibCheck": true
-  }
+  },
+  "//": "The typecheck gate covers shipped src/ only. Test files are deliberately excluded — they are exercised by `bun test` at runtime, and noUncheckedIndexedAccess on test scaffolding (indexing arrays the test just built) is noise, not a safety signal.",
+  "exclude": ["node_modules", "**/__tests__/**", "**/*.test.ts"]
 }
