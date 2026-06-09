@@ -717,7 +717,7 @@ export function defaultDrainDeps(cfg: {
     async appendLessonFn(line) {
       // The loop passes a "[tag] rule" line; appendLesson wants { tag, rule }.
       const m = line.match(/^\[([^\]]+)\]\s*(.*)$/);
-      const lesson = m ? { tag: m[1].trim(), rule: m[2].trim() } : { tag: "general", rule: line };
+      const lesson = m ? { tag: m[1]!.trim(), rule: m[2]!.trim() } : { tag: "general", rule: line }; // groups 1,2 exist after match
       await appendLesson(cfg.lessonsPath, lesson);
     },
 

@@ -311,7 +311,7 @@ function candidateGlossaryTerms(inputs: BriefInputs): string[] {
   const haystack = `${inputs.description} ${inputs.readmeFirstPara}`;
   // CamelCase or Capitalized multi-letter tokens that look like a coined product/domain term.
   for (const m of haystack.matchAll(/\b([A-Z][a-zA-Z]{3,}(?:[A-Z][a-zA-Z]+)*)\b/g)) {
-    terms.add(m[1]);
+    terms.add(m[1]!); // group 1 exists after matchAll with capture group
   }
   return [...terms].slice(0, 6);
 }

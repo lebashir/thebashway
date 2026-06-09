@@ -66,7 +66,7 @@ export function scanForTodos(
   for (const f of files) {
     const lines = f.text.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(markerRegex);
+      const m = lines[i]!.match(markerRegex); // i < lines.length
       const captured = m?.[1]?.trim();
       if (!captured) continue;
       out.push({
@@ -116,10 +116,10 @@ export function scanForWrapUpCandidates(
     let inFrontmatter = lines[0]?.trim() === "---";
     for (let i = 0; i < lines.length; i++) {
       if (inFrontmatter) {
-        if (i > 0 && lines[i].trim() === "---") inFrontmatter = false;
+        if (i > 0 && lines[i]!.trim() === "---") inFrontmatter = false; // i < lines.length
         continue;
       }
-      const text = lines[i].match(/^\s*-\s+(.*\S)\s*$/)?.[1];
+      const text = lines[i]!.match(/^\s*-\s+(.*\S)\s*$/)?.[1]; // i < lines.length
       if (!text || !signal.test(text)) continue;
       const h = createHash("sha1").update(normalizeMarkerText(text)).digest("hex").slice(0, 8);
       out.push({

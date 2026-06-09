@@ -107,11 +107,11 @@ export function parseNameStatus(stdout: string): FileChange[] {
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     const parts = line.split("\t");
-    const code = parts[0][0]; // first char: A/M/D/R/C
+    const code = parts[0]![0]; // split always has ≥1 element
     if (code === "R" || code === "C") {
-      out.push({ status: "M", path: parts[2] ?? parts[1] });
+      out.push({ status: "M", path: parts[2] ?? parts[1]! }); // R/C git output has ≥2 tab-separated parts
     } else if (code === "A" || code === "M" || code === "D") {
-      out.push({ status: code, path: parts[1] });
+      out.push({ status: code, path: parts[1]! }); // A/M/D git output has ≥2 tab-separated parts
     }
   }
   return out;

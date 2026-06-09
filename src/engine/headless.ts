@@ -83,7 +83,7 @@ export function parseMarker(stdout: string, marker: string): string | null {
   let found: string | null = null;
   for (const line of stdout.split("\n")) {
     const m = line.trim().match(re);
-    if (m) found = m[1].trim();
+    if (m) found = m[1]!.trim(); // group 1 exists after successful match
   }
   return found;
 }
