@@ -75,7 +75,7 @@ function parseTag(
   }
   // "@session-X / branch-Y"
   const m = t.match(/^@(\S+)\s*\/\s*(\S+)/);
-  if (m) return { status: "claimed", claim: { session: m[1], branch: m[2] } };
+  if (m) return { status: "claimed", claim: { session: m[1]!, branch: m[2]! } }; // groups 1,2 exist after match
   return { status: "unclaimed" };
 }
 
@@ -100,7 +100,7 @@ export function parseQueue(md: string): QueueItem[] {
 }
 
 function parseBlock(block: string[]): QueueItem {
-  const head = block[0];
+  const head = block[0]!; // parseBlock only called for blocks with ≥1 element
   const doneBox = /^- \[x\]/.test(head);
   const tagSplit = head.replace(/^- \[[ x]\]\s*/, "");
   const atIdx = tagSplit.lastIndexOf("@");
@@ -133,13 +133,13 @@ function parseBlock(block: string[]): QueueItem {
     if (/^Clarifications:/i.test(line)) { inClar = true; continue; }
     if (inClar && line.startsWith("- Q:")) {
       const m = line.match(/^- Q:\s*(.*?)\s*A:\s*(.*)$/);
-      if (m) item.clarifications.push({ q: m[1], a: m[2] });
+      if (m) item.clarifications.push({ q: m[1]!, a: m[2]! }); // groups 1,2 exist after match
       continue;
     }
     const kv = line.match(/^([A-Za-z-]+):\s*(.*)$/);
     if (!kv) continue;
-    const key = kv[1].toLowerCase();
-    const val = kv[2].trim();
+    const key = kv[1]!.toLowerCase(); // group 1 exists after match
+    const val = kv[2]!.trim(); // group 2 exists after match
     if (key === "goal") { item.goal = val; inClar = false; }
     else if (key === "territory") { item.territory = val.split(",").map((s) => s.trim()).filter(Boolean); inClar = false; }
     else if (key === "done-when") { item.doneWhen = val; inClar = false; }

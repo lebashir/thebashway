@@ -26,7 +26,7 @@ export function parseLessons(md: string): Lesson[] {
   // No `## Active` header → entire doc is in scope (older single-tier format).
   let inScope = activeIdx === -1;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i]!; // i < lines.length
     if (activeIdx !== -1) {
       if (i === activeIdx) { inScope = true; continue; }
       // Any subsequent `## ...` header closes the Active section.
@@ -34,7 +34,7 @@ export function parseLessons(md: string): Lesson[] {
     }
     if (!inScope) continue;
     const m = line.match(/^\s*-\s*\[([^\]]+)\]\s*(.+?)\s*$/);
-    if (m) out.push({ tag: m[1].trim(), rule: m[2].trim() });
+    if (m) out.push({ tag: m[1]!.trim(), rule: m[2]!.trim() }); // groups 1,2 exist after match
   }
   return out;
 }
@@ -80,10 +80,10 @@ export async function appendLesson(path: string, lesson: Lesson): Promise<boolea
   // lines so the new entry sits with its siblings.
   let endIdx = lines.length;
   for (let i = activeIdx + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i])) { endIdx = i; break; }
+    if (/^##\s+/.test(lines[i]!)) { endIdx = i; break; } // i < lines.length
   }
   let insertAt = endIdx;
-  while (insertAt > activeIdx + 1 && lines[insertAt - 1].trim() === "") insertAt--;
+  while (insertAt > activeIdx + 1 && lines[insertAt - 1]!.trim() === "") insertAt--; // insertAt-1 is within bounds
   const before = lines.slice(0, insertAt).join("\n");
   const after = lines.slice(insertAt).join("\n");
   const sep = before.endsWith("\n") ? "" : "\n";

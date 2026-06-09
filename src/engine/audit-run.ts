@@ -213,7 +213,7 @@ function balancedSpans(s: string): string[] {
  */
 export function extractJsonBlock(stdout: string): string | null {
   const fences = [...stdout.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
-  if (fences.length) return fences[fences.length - 1][1].trim();
+  if (fences.length) return fences[fences.length - 1]![1]!.trim(); // last fence exists (length>0); group 1 is the code block body
   let best: string | null = null;
   for (const span of balancedSpans(stdout)) {
     try {

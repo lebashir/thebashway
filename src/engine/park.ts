@@ -64,7 +64,7 @@ async function syncNowParkedSection(
   // Replace the existing section (header → next `##` or EOF).
   let endIdx = all.length;
   for (let i = headerIdx + 1; i < all.length; i++) {
-    if (/^##\s+/.test(all[i])) { endIdx = i; break; }
+    if (/^##\s+/.test(all[i]!)) { endIdx = i; break; } // i < all.length
   }
   const before = all.slice(0, headerIdx).join("\n");
   const after = all.slice(endIdx).join("\n");

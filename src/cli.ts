@@ -405,7 +405,7 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
   const tIdx = args.indexOf("--target");
   const targetCriteria =
     tIdx >= 0 && args[tIdx + 1]
-      ? args[tIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
+      ? args[tIdx + 1]!.split(",").map((s) => s.trim()).filter(Boolean) // truthy check above
       : undefined;
   const mIdx = args.indexOf("--milestone");
   const milestone = mIdx >= 0 ? args[mIdx + 1] : undefined;
@@ -496,7 +496,7 @@ async function cmdReflect(cwd: string, args: string[], configPath?: string): Pro
   };
   const flagVals = (flag: string): string[] => {
     const out: string[] = [];
-    for (let i = 0; i < args.length; i++) if (args[i] === flag && args[i + 1]) out.push(args[i + 1]);
+    for (let i = 0; i < args.length; i++) if (args[i] === flag && args[i + 1]) out.push(args[i + 1]!); // truthy check above
     return out;
   };
   const milestone = flagVal("--milestone") ?? flagVal("--epic");
@@ -715,8 +715,8 @@ async function cmdAddDecision(cwd: string, args: string[], configPath?: string):
   }
   // An explicit `[tag] rule` form is parsed (the same shape the drain's appendLessonFn uses).
   const m = positional.match(/^\[([^\]]+)\]\s*(.*)$/);
-  const tag = flagTag?.trim() || (m ? m[1].trim() : undefined);
-  const rule = (m ? m[2] : positional).trim();
+  const tag = flagTag?.trim() || (m ? m[1]!.trim() : undefined); // group 1 exists after match
+  const rule = (m ? m[2]! : positional).trim(); // group 2 exists after match
   if (!rule) {
     console.error("add-decision: empty rule");
     return 2;
@@ -835,7 +835,7 @@ async function cmdVerify(cwd: string, args: string[], configPath?: string): Prom
   const baseIdx = args.indexOf("--base");
   const base = baseIdx >= 0 ? args[baseIdx + 1] : "HEAD";
   const territory: string[] = [];
-  for (let i = 0; i < args.length; i++) if (args[i] === "--territory" && args[i + 1]) territory.push(args[i + 1]);
+  for (let i = 0; i < args.length; i++) if (args[i] === "--territory" && args[i + 1]) territory.push(args[i + 1]!); // truthy check above
   const json = args.includes("--json");
   try {
     const { manifest } = await runVerify({

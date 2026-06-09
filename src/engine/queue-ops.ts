@@ -13,7 +13,7 @@ function splitHeader(md: string): string {
   let inComment = false;
   let firstItem = lines.length;
   for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
+    const l = lines[i]!; // i < lines.length
     if (l.includes("<!--")) inComment = true;
     if (!inComment && /^- \[[ x]\]/.test(l)) {
       firstItem = i;

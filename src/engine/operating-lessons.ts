@@ -48,9 +48,9 @@ export function parseLessons(md: string): ParsedLessons {
     if (mode === "none") continue;
     const m = line.match(BULLET_RE);
     if (!m) continue;
-    const areaPart = m[1]; // "[area1] [area2] "
-    const body = m[2].trim();
-    const areas = [...areaPart.matchAll(/\[([^\]]+)\]/g)].map((mm) => mm[1].trim());
+    const areaPart = m[1]!; // group 1 exists after BULLET_RE match
+    const body = m[2]!.trim(); // group 2 exists after BULLET_RE match
+    const areas = [...areaPart.matchAll(/\[([^\]]+)\]/g)].map((mm) => mm[1]!.trim()); // group 1 is the bracketed area
     if (areas.length === 0) continue;
     out[mode].push({ areas, body });
   }
