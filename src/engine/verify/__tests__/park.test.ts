@@ -56,8 +56,8 @@ test("emitPark calls emitExternal exactly once with kind='parked'", async () => 
     emitExternal: async (event, kind) => { calls.push({ event, kind }); },
   });
   expect(calls).toHaveLength(1);
-  expect(calls[0].kind).toBe("parked");
-  expect(calls[0].event.item).toBe("A");
+  expect(calls[0]!.kind).toBe("parked");
+  expect(calls[0]!.event.item).toBe("A");
   unlinkSync(qPath);
   unlinkSync(nowPath);
 });
@@ -92,8 +92,8 @@ test("emitUnparkScan refreshes NOW.md (drops resolved parks) + emits unparked ex
   });
   expect(unparked).toEqual(["B"]);
   expect(externalCalls).toHaveLength(1);
-  expect(externalCalls[0].kind).toBe("unparked");
-  expect(externalCalls[0].event.item).toBe("B");
+  expect(externalCalls[0]!.kind).toBe("unparked");
+  expect(externalCalls[0]!.event.item).toBe("B");
   const nowText = await Bun.file(nowPath).text();
   expect(nowText).not.toContain("- A — x");
   unlinkSync(qPath);
@@ -159,7 +159,7 @@ test("emitPark is idempotent on the title: a second park does NOT duplicate the 
   // Exactly ONE item with that title — ensureParkItem no-ops when the item already exists,
   // so the rate-limit scan (status:'parked' && title===…) sees a real prior park to suppress on.
   expect(matches).toHaveLength(1);
-  expect(matches[0].status).toBe("parked");
+  expect(matches[0]!.status).toBe("parked");
 
   unlinkSync(qPath);
   unlinkSync(nowPath);

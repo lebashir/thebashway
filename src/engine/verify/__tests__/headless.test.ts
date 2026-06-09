@@ -31,7 +31,7 @@ test("headlessEnv: scrubs ANTHROPIC_API_KEY and sets subscription/operator env",
   expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   expect(env.LIFEOFBASH_SCOPE).toBe("operator");
   expect(env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0");
-  expect(env.PATH.startsWith("/opt/homebrew/bin:/usr/local/bin:")).toBe(true);
+  expect(env.PATH!.startsWith("/opt/homebrew/bin:/usr/local/bin:")).toBe(true);
 });
 
 test("headlessEnv: even a process-env key cannot leak the API key through", () => {
@@ -96,8 +96,8 @@ test("runClaude: success path — exit 0 → ok:true with captured stdout", asyn
   expect(r.timedOut).toBe(false);
   expect(r.stdout).toContain("DONE: ok");
   // Spawned the real binary name with the assembled args.
-  expect(calls[0].cmd).toBe("claude");
-  expect(calls[0].args).toEqual(["-p", "--model", "sonnet", "--dangerously-skip-permissions", "build"]);
+  expect(calls[0]!.cmd).toBe("claude");
+  expect(calls[0]!.args).toEqual(["-p", "--model", "sonnet", "--dangerously-skip-permissions", "build"]);
 });
 
 test("runClaude: non-zero exit → ok:false (never throws)", async () => {

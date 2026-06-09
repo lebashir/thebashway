@@ -40,10 +40,10 @@ test("queueView: partition is EXHAUSTIVE — every item in exactly one bucket (s
     mkItem("docs", ["docs/z.md"]), // other (no surface)
   ];
   const v = queueView(items, MULTI);
-  const total = v.lanes.organs.length + v.lanes.tools.length + v.unrouted.length + v.other.length;
+  const total = v.lanes.organs!.length + v.lanes.tools!.length + v.unrouted.length + v.other.length;
   expect(total).toBe(items.length);
-  expect(v.lanes.organs.map((i) => i.title)).toEqual(["organ1", "organ2"]);
-  expect(v.lanes.tools.map((i) => i.title)).toEqual(["tool1"]);
+  expect(v.lanes.organs!.map((i) => i.title)).toEqual(["organ1", "organ2"]);
+  expect(v.lanes.tools!.map((i) => i.title)).toEqual(["tool1"]);
   expect(v.unrouted.map((i) => i.title)).toEqual(["intake"]);
   expect(v.other.map((i) => i.title)).toEqual(["cross", "docs"]);
 });
@@ -57,7 +57,7 @@ test("queueView: every configured surface gets a (possibly empty) lane, in surfa
 test("queueView: a single root `.` surface puts every routed item in that one lane (degenerate)", () => {
   const root: SurfaceLane[] = [{ name: "engine", dir: "." }];
   const v = queueView([mkItem("x", ["src/a.ts"]), mkItem("y", ["anything/b/**"]), mkItem("z", [])], root);
-  expect(v.lanes.engine.map((i) => i.title)).toEqual(["x", "y"]); // both routed land in the one lane
+  expect(v.lanes.engine!.map((i) => i.title)).toEqual(["x", "y"]); // both routed land in the one lane
   expect(v.unrouted.map((i) => i.title)).toEqual(["z"]); // empty-territory still unrouted
   expect(v.other).toEqual([]);
 });
