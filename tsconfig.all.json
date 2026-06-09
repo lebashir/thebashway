@@ -1,0 +1,5 @@
+{
+  "//": "Whole-repo typecheck INCLUDING test files. The default tsconfig.json scopes the gate to src/; this config (used by `bun run typecheck:all`) is the stricter bar that also covers __tests__. It backs the brief's `tests-typed` success criterion — full type coverage, tests included.",
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules"]
+}

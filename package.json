@@ -15,6 +15,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "bun --bun x tsc --noEmit",
+    "typecheck:all": "bun --bun x tsc --noEmit -p tsconfig.all.json",
     "thebashway": "bun run src/cli.ts",
     "verify": "bun run src/cli.ts verify"
   },
