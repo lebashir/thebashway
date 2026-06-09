@@ -13,16 +13,16 @@ const base = (over: Partial<QueueItem> = {}): QueueItem => ({
 
 test("needs-intake round-trips through serialize -> parse", () => {
   const md = serializeItem(base({ title: "Rough idea", status: "needs-intake" }));
-  const [item] = parseQueue(md);
+  const item = parseQueue(md)[0]!; // single-item input
   expect(item.status).toBe("needs-intake");
   expect(item.title).toBe("Rough idea");
 });
 
 test("origin:auto round-trips and defaults to human when absent", () => {
-  const withAuto = parseQueue(serializeItem(base({ origin: "auto" })))[0];
+  const withAuto = parseQueue(serializeItem(base({ origin: "auto" })))[0]!; // single-item round-trip
   expect(withAuto.origin).toBe("auto");
   // A legacy line with no origin parses as undefined (treated as human by callers).
-  const legacy = parseQueue("- [ ] Old item        @unclaimed\n  Goal: g\n  Territory: tools/**\n  Done-when: v")[0];
+  const legacy = parseQueue("- [ ] Old item        @unclaimed\n  Goal: g\n  Territory: tools/**\n  Done-when: v")[0]!; // single-item input
   expect(legacy.origin).toBeUndefined();
 });
 

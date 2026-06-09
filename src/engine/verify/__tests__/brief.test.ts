@@ -54,7 +54,7 @@ test("DesignBriefSchema parses a full brief", () => {
     expect(parsed.data.purpose).toBe("Ship the north-star design brief.");
     expect(parsed.data.successCriteria.length).toBe(2);
     // CheckSpec defaults applied:
-    const cmd = parsed.data.successCriteria[0].check;
+    const cmd = parsed.data.successCriteria[0]!.check; // index 0 of 2-element array asserted above
     expect(cmd.kind).toBe("command");
     if (cmd.kind === "command") {
       expect(cmd.expectExit).toBe(0);
