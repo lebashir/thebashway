@@ -649,3 +649,25 @@ test("Loop B: a plain build-fail with NO basha lesson captures nothing (no synth
   expect(calls.lessons).toEqual([]); // build-fail is not synthesized (often transient)
   cleanup(p);
 });
+
+// ---------------------------------------------------------------------------
+// Diagnostics on block (closing the observability gap): a blocked item must leave a
+// readable reason + a persisted log, not a bare "verify exit 1".
+// ---------------------------------------------------------------------------
+import { distillFailure, unitLogPath } from "../../drain";
+
+test("distillFailure: surfaces the failing lines out of a verbose transcript", () => {
+  const out = ["ok   freshness", "ok   test", "FAIL scope — outside territory: src/other.ts", "VERIFY FAILED"].join("\n");
+  const d = distillFailure(out);
+  expect(d).toContain("FAIL scope");
+  expect(d).not.toContain("freshness");
+});
+
+test("distillFailure: falls back to the last non-empty lines when nothing looks like a failure", () => {
+  const out = ["line one", "", "line two", "line three", "line four"].join("\n");
+  expect(distillFailure(out, 2)).toBe("line three | line four");
+});
+
+test("unitLogPath: a repoRoot-anchored .thebashway/logs path with the branch slashes sanitized", () => {
+  expect(unitLogPath("/repo", "tbw/fix-foo")).toBe("/repo/.thebashway/logs/tbw-fix-foo.log");
+});

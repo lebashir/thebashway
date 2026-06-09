@@ -16,7 +16,7 @@
 // `defaultDrainDeps` (wired by cli.ts), which the unit tests never execute.
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, relative } from "node:path";
 import { rm, symlink } from "node:fs/promises";
 import type { QueueItem } from "./queue";
 import type { ProjectBinding } from "../binding";
@@ -219,6 +219,27 @@ export function drainPaths(binding: Pick<ProjectBinding, "surfaces" | "paths">, 
   const manifestRel = binding.paths?.manifest ?? ".thebashway/.verify-manifest.json";
   const nodeModulesLinks = surfaceDir === "." ? ["node_modules"] : ["node_modules", `${surfaceDir}/node_modules`];
   return { surfaceDir, manifestRel, nodeModulesLinks };
+}
+
+// ---------------------------------------------------------------------------
+// Block diagnostics (closing the observability gap)
+// ---------------------------------------------------------------------------
+
+/**
+ * Distill a verbose verify/basha transcript into a short reason tail. Prefers lines that look like
+ * failures (FAIL / error / a non-zero exit / a cross mark); falls back to the last non-empty lines.
+ * Turns a 500-line transcript into a one-line `report.blocked` reason that actually says what broke.
+ */
+export function distillFailure(output: string, maxLines = 3): string {
+  const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+  const failish = lines.filter((l) => /(\bFAIL\b|error|Error|✗|\bexit [1-9])/.test(l));
+  return (failish.length ? failish : lines).slice(-maxLines).join(" | ");
+}
+
+/** Where a unit's basha + verify transcript is persisted for post-mortem (repoRoot-anchored). The
+ *  branch's slashes are sanitized so it's a single flat filename. */
+export function unitLogPath(repoRoot: string, branch: string): string {
+  return resolve(repoRoot, ".thebashway", "logs", `${branch.replace(/[^a-zA-Z0-9]+/g, "-")}.log`);
 }
 
 // ---------------------------------------------------------------------------
@@ -562,14 +583,22 @@ export function defaultDrainDeps(cfg: {
         model,
         skipPermissions: true,
       });
+      // Persist the basha transcript for post-mortem — a record on success, the diagnostic on a
+      // block (the branch is torn down, so this log is the only surviving trace of what it did).
+      const logPath = unitLogPath(cfg.repoRoot, ctx.branch);
+      const logRel = relative(cfg.repoRoot, logPath);
+      await Bun.write(logPath, `=== basha (${model}) "${item.title}" on ${ctx.branch} ===\n${res.stdout}\n`).catch(() => {});
       // Loop B: parse an optional self-distilled `LESSON: [tag] rule` line (may be present on a
       // DONE or a BLOCKED); the core routes it through appendLessonFn.
       const lesson = parseMarker(res.stdout, "LESSON") ?? undefined;
-      if (!res.ok) return { ok: false, branch: ctx.branch, reason: res.timedOut ? "basha timed out" : "basha exited non-zero", lesson };
+      if (!res.ok) {
+        const why = res.timedOut ? "basha timed out" : "basha exited non-zero";
+        return { ok: false, branch: ctx.branch, reason: `${why}: ${distillFailure(res.stdout)} (log: ${logRel})`, lesson };
+      }
       const done = parseMarker(res.stdout, "DONE");
       if (done !== null) return { ok: true, branch: ctx.branch, lesson };
       const blocked = parseMarker(res.stdout, "BLOCKED");
-      return { ok: false, branch: ctx.branch, reason: blocked ?? "no DONE/BLOCKED marker", lesson };
+      return { ok: false, branch: ctx.branch, reason: `${blocked ?? "no DONE/BLOCKED marker"} (log: ${logRel})`, lesson };
     },
 
     async verifyUnit(item, _branch, worktree) {
@@ -581,7 +610,15 @@ export function defaultDrainDeps(cfg: {
       // tamper-recheck from the primary checkout (the head SHA is a shared git object).
       const worktreeSurface = resolve(worktree, cfg.paths.surfaceDir);
       const r = await bunRun(verifyArgs(cfg.baseRef, item.territory), { cwd: worktreeSurface });
-      if (r.code !== 0) return { ok: false, manifestHash: "-", reason: `verify exit ${r.code}` };
+      if (r.code !== 0) {
+        // Append the verify transcript to the unit log and distill WHICH check failed into the
+        // reason — so a block reads "verify exit 1: FAIL scope — outside territory: …", not "exit 1".
+        const logPath = unitLogPath(cfg.repoRoot, _branch);
+        const prior = (await Bun.file(logPath).exists().then((e) => (e ? Bun.file(logPath).text() : ""))) ?? "";
+        await Bun.write(logPath, `${prior}\n=== verify (exit ${r.code}) ===\n${r.stdout}\n${r.stderr}\n`).catch(() => {});
+        const detail = distillFailure(`${r.stdout}\n${r.stderr}`);
+        return { ok: false, manifestHash: "-", reason: `verify exit ${r.code}: ${detail} (log: ${relative(cfg.repoRoot, logPath)})` };
+      }
       const wtManifest = resolve(worktree, cfg.paths.manifestRel);
       let manifestHash = "-";
       try {
@@ -622,7 +659,7 @@ export function defaultDrainDeps(cfg: {
       // union territory, then restore the original branch regardless of the result.
       const r = await bunRun(verifyArgs(cfg.baseRef, unionTerritory), { cwd: resolve(cfg.repoRoot, cfg.paths.surfaceDir) });
       await restore();
-      if (r.code !== 0) return { ok: false, reason: "integration re-verify failed", misSlice: true };
+      if (r.code !== 0) return { ok: false, reason: `integration re-verify failed: ${distillFailure(`${r.stdout}\n${r.stderr}`)}`, misSlice: true };
       return { ok: true };
     },
 
