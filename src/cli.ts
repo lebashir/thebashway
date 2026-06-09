@@ -445,6 +445,10 @@ async function cmdRunToGoal(cwd: string, args: string[], configPath?: string): P
       repoRoot: lb.paths.repoRoot,
       briefPath: lb.paths.briefPath,
       targetCriteria,
+      // `--no-land`: each iteration's drain stages at its green integration branch instead of
+      // merging to main + pushing (parity with fix/build/drain). Threaded via drainOpts.land,
+      // which buildDrainOpts spreads first and never overrides.
+      drainOpts: args.includes("--no-land") ? { land: false } : undefined,
       // REQUIRED caps (memory bashir-cost-sensitive): three independent axes. maxIterations
       // (default 5, in runToGoal) bounds drain passes; maxWallClockMs is the time backstop;
       // costCeiling bounds the cumulative BUILD BASHAS spawned (the real LLM-spend driver) — a
@@ -964,7 +968,7 @@ function usage(): void {
                                          OUT-door: claim -> build basha -> re-verify -> integrate -> land (drain half of fix)
   thebashway "<request>"                 auto-route to build or fix
   thebashway brief                       (re)seed + print the per-project north star draft + its gaps
-  thebashway run-to-goal [--target <id,…>] [--milestone <label>]
+  thebashway run-to-goal [--target <id,…>] [--milestone <label>] [--no-land]
                                          AUTONOMOUS: re-drain until the brief's target (a slice via
                                          --target, or all required criteria) is met, under caps;
                                          --milestone fires the Loop-C reflection on a successful run
