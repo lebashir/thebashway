@@ -14,7 +14,8 @@
   },
   "scripts": {
     "test": "bun test",
-    "thebashway": "bun run src/cli.ts"
+    "thebashway": "bun run src/cli.ts",
+    "verify": "bun run src/cli.ts verify"
   },
   "dependencies": {
     "zod": "^3.23.0"

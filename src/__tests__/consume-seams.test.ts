@@ -2,6 +2,7 @@
 // data locations, design system, and completeness rules — the generalizations the consume needs.
 import { test, expect } from "bun:test";
 import { derivePaths } from "../cli";
+import { drainPaths } from "../engine/drain";
 import { defineThebashway, type ProjectBinding } from "../binding";
 import { setBinding, resetBinding, getDesignBar, SURFACES } from "../engine/config";
 import { checkRequiredTouches } from "../engine/required-touches";
@@ -38,6 +39,30 @@ test("derivePaths: binding.paths overrides — a consumer keeps data elsewhere +
   expect(p.runLogPath).toBe("/repo/tools/orchestrator/run-log.md");
   expect(p.nowPath).toBe("/repo/NOW.md"); // F1: park refreshes the REAL root NOW.md, not .thebashway/NOW.md
   expect(p.manifestPath).toBe("/repo/tools/orchestrator/.verify-manifest.json");
+});
+
+test("drainPaths: a single-surface repo at root (no paths) — the OUT-door loop derives root-relative locations, NOT lifeofbash's tools/", () => {
+  // The thebashway dogfood shape: one surface at the repo root, default loop-data paths.
+  const b = defineThebashway({ ...base });
+  const dp = drainPaths(b, "app");
+  expect(dp.surfaceDir).toBe(".");
+  expect(dp.manifestRel).toBe(".thebashway/.verify-manifest.json");
+  // dir "." → no redundant "./node_modules"; just the root link.
+  expect(dp.nodeModulesLinks).toEqual(["node_modules"]);
+});
+
+test("drainPaths: a consumer with a subdir surface + custom manifest (lifeofbash shape) — derives tools/ from the binding, not a hardcode", () => {
+  const b = defineThebashway({
+    ...base,
+    defaultSurface: "tools",
+    surfaces: { tools: { dir: "tools", role: "x", chain: [] } },
+    paths: { manifest: "tools/orchestrator/.verify-manifest.json" },
+  });
+  const dp = drainPaths(b, "tools");
+  expect(dp.surfaceDir).toBe("tools");
+  expect(dp.manifestRel).toBe("tools/orchestrator/.verify-manifest.json");
+  // a subdir surface needs both the root node_modules and the surface's own.
+  expect(dp.nodeModulesLinks).toEqual(["node_modules", "tools/node_modules"]);
 });
 
 test("getDesignBar: null by default, set from binding.designBar, cleared by resetBinding (F4)", () => {

@@ -38,7 +38,7 @@ import { runVerify } from "./engine/verify/index";
 import { z } from "zod";
 import { spawnSync } from "node:child_process";
 import { resolveTarget, effectiveQueueStatus, CompletableItemSchema } from "./engine/audit";
-import { drain, defaultDrainDeps, type DrainDeps } from "./engine/drain";
+import { drain, defaultDrainDeps, drainPaths, type DrainDeps } from "./engine/drain";
 import { runAudit, defaultAuditDeps } from "./engine/audit-run";
 import { runFeatureDesign, defaultDesignDeps } from "./engine/design-run";
 import { gitHead, bunRun } from "./engine/verify/run";
@@ -222,6 +222,9 @@ function drainDepsFor(lb: LoadedBinding, surface: string, baseRef: string, notif
     seedPaths: lb.binding.seedPaths ?? [],
     runLogPath: lb.paths.runLogPath,
     lessonsPath: lb.paths.lessonsPath,
+    // Binding-derived OUT-door paths (surfaceDir / manifestRel / nodeModulesLinks) — the loop
+    // runs on this repo's real layout, not a hardcoded "tools".
+    paths: drainPaths(lb.binding, surface),
   });
 }
 

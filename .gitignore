@@ -1,4 +1,5 @@
 node_modules/
 .verify-manifest.json
+.thebashway/
 .DS_Store
 *.log

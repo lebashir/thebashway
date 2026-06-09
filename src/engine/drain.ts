@@ -19,6 +19,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { rm, symlink } from "node:fs/promises";
 import type { QueueItem } from "./queue";
+import type { ProjectBinding } from "../binding";
 import { claimNextN, markDone, markBlocked, previewClaimable } from "./queue-ops";
 import { shouldTrip } from "./breaker";
 import { type DigestRecord, summaryLine } from "./digest";
@@ -185,6 +186,34 @@ function unsafeIntegrationBranch(b: string): string | null {
   if (b === "main" || b === "master") return `integration branch must never be "${b}"`;
   if (!b.startsWith("tbw/")) return `integration branch must be tbw/-prefixed, got "${b}"`;
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Binding-derived OUT-door paths (the portability seam)
+// ---------------------------------------------------------------------------
+
+export interface DrainPaths {
+  /** The surface's dir (checkout-relative) — where its `verify` package script + manifest live. */
+  surfaceDir: string;
+  /** The verify manifest path (checkout-relative): binding.paths.manifest or the .thebashway default. */
+  manifestRel: string;
+  /** node_modules symlink sources to mirror from the primary checkout into a non-real-install worktree. */
+  nodeModulesLinks: string[];
+}
+
+/**
+ * Derive the OUT-door loop's checkout-relative paths from the BINDING — never hardcoded. This is the
+ * fix for the loop's old lifeofbash coupling (a literal "tools" + "tools/orchestrator/.verify-manifest.json"):
+ * the verify subprocess runs in `surfaceDir` (where the repo's `verify` package script + manifest
+ * resolve), the orchestrator reads the manifest at `manifestRel`, and a non-real-install worktree
+ * mirrors `nodeModulesLinks`. A root surface (dir ".") yields just the root link — no redundant
+ * "./node_modules"; a subdir surface also mirrors its own.
+ */
+export function drainPaths(binding: Pick<ProjectBinding, "surfaces" | "paths">, surface: string): DrainPaths {
+  const surfaceDir = binding.surfaces[surface]?.dir ?? ".";
+  const manifestRel = binding.paths?.manifest ?? ".thebashway/.verify-manifest.json";
+  const nodeModulesLinks = surfaceDir === "." ? ["node_modules"] : ["node_modules", `${surfaceDir}/node_modules`];
+  return { surfaceDir, manifestRel, nodeModulesLinks };
 }
 
 // ---------------------------------------------------------------------------
@@ -402,9 +431,11 @@ const WORKTREE_ROOT = join(homedir(), ".claude", "worktrees");
  * notifyTelegram from ../jobs so drain.ts itself stays free of the cross-layer
  * import). Everything else wires the existing orchestrator primitives.
  *
- * NOTE: the default git/worktree plumbing here (worktree-located verify, node_modules
- * symlink for tools worktrees, manifest sharing, integration-branch restore, the land
- * step) was exercised live and green on BOTH surfaces 2026-06-05 — two single-item
+ * NOTE: the default git/worktree plumbing here (worktree-located verify, the node_modules
+ * symlink, manifest sharing, integration-branch restore, the land step) reads all of its
+ * checkout-relative locations from the binding via `drainPaths` (surfaceDir / manifestRel /
+ * nodeModulesLinks) — no hardcoded "tools". It was exercised live and green on BOTH lifeofbash
+ * surfaces 2026-06-05 — two single-item
  * drains (an organs money fix + a tools ingest fix), each built by a headless basha,
  * verified, integrated, and landed to main + deployed. Still only lightly proven (two
  * runs); expect more edge cases at higher volume. The injected-seam core (`drain`) is
@@ -418,6 +449,10 @@ export function defaultDrainDeps(cfg: {
   seedPaths: string[];
   runLogPath: string;
   lessonsPath: string;
+  /** Binding-derived checkout-relative paths (surfaceDir / manifestRel / nodeModulesLinks) — see
+   *  drainPaths(). Replaces the old hardcoded "tools" + "tools/orchestrator/.verify-manifest.json"
+   *  so the loop runs on ANY repo, not just lifeofbash's layout. */
+  paths: DrainPaths;
 }): DrainDeps {
   const wtPath = (branch: string) => join(WORKTREE_ROOT, branch.replace(/[^a-zA-Z0-9]+/g, "-"));
   // The primary checkout's branch at run start — restored after each integrate so a
@@ -448,12 +483,13 @@ export function defaultDrainDeps(cfg: {
         // others symlink node_modules from the primary checkout (below).
         install: !!SURFACES[cfg.surface]?.needsRealInstall,
       });
-      // The tools surface is bun/pnpm-managed and NOT installed in the worktree (no
-      // Turbopack), so symlink node_modules from the primary checkout — without it the
-      // bun gate chain can't resolve deps. organs got a real install above (a symlink
-      // is rejected by Turbopack). See lessons.md [worktree].
+      // A non-real-install surface (bun/pnpm-managed, no Turbopack) is NOT installed in the
+      // worktree, so symlink node_modules from the primary checkout — without it the gate chain
+      // can't resolve deps. The links are binding-derived (drainPaths): the repo root + the
+      // surface's own dir, never a hardcoded "tools/node_modules". A real-install surface (e.g.
+      // Turbopack, which rejects a symlinked node_modules) got its real install above.
       if (!SURFACES[cfg.surface]?.needsRealInstall) {
-        for (const rel of ["node_modules", "tools/node_modules"]) {
+        for (const rel of cfg.paths.nodeModulesLinks) {
           const target = resolve(cfg.repoRoot, rel);
           const link = resolve(workPath, rel);
           if (existsSync(target) && !existsSync(link)) {
@@ -504,16 +540,16 @@ export function defaultDrainDeps(cfg: {
     },
 
     async verifyUnit(item, _branch, worktree) {
-      // Run verify INSIDE the worktree's tools dir: the basha committed the unit's work
-      // on the worktree's branch, and verify/index.ts derives repoRoot from
-      // import.meta.dir → the worktree, so its HEAD is the unit tip (the primary
-      // checkout's HEAD does NOT contain the unit's work). Read the manifest the run
-      // wrote in the worktree, then tamper-recheck from the primary checkout (the head
-      // SHA is a shared git object).
-      const worktreeTools = resolve(worktree, "tools");
-      const r = await bunRun(verifyArgs(cfg.baseRef, item.territory), { cwd: worktreeTools });
+      // Run verify INSIDE the worktree's SURFACE dir (binding-derived, not a hardcoded "tools"):
+      // the basha committed the unit's work on the worktree's branch, and `bun run verify` in the
+      // surface dir resolves the repo's own `verify` script + loads its binding (repoRoot →
+      // worktree), so its HEAD is the unit tip (the primary checkout's HEAD does NOT contain the
+      // unit's work). Read the manifest the run wrote in the worktree (binding-derived path), then
+      // tamper-recheck from the primary checkout (the head SHA is a shared git object).
+      const worktreeSurface = resolve(worktree, cfg.paths.surfaceDir);
+      const r = await bunRun(verifyArgs(cfg.baseRef, item.territory), { cwd: worktreeSurface });
       if (r.code !== 0) return { ok: false, manifestHash: "-", reason: `verify exit ${r.code}` };
-      const wtManifest = resolve(worktree, "tools", "orchestrator", ".verify-manifest.json");
+      const wtManifest = resolve(worktree, cfg.paths.manifestRel);
       let manifestHash = "-";
       try {
         const m = JSON.parse(await Bun.file(wtManifest).text()) as VerifyManifest;
@@ -551,7 +587,7 @@ export function defaultDrainDeps(cfg: {
       }
       // On the integration branch now (merged tree) — integration re-verify against the
       // union territory, then restore the original branch regardless of the result.
-      const r = await bunRun(verifyArgs(cfg.baseRef, unionTerritory), { cwd: resolve(cfg.repoRoot, "tools") });
+      const r = await bunRun(verifyArgs(cfg.baseRef, unionTerritory), { cwd: resolve(cfg.repoRoot, cfg.paths.surfaceDir) });
       await restore();
       if (r.code !== 0) return { ok: false, reason: "integration re-verify failed", misSlice: true };
       return { ok: true };
