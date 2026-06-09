@@ -88,11 +88,32 @@ test("main add-decision writes to the binding's decisions.md, parses [tag], and 
 });
 
 test("main queue: summary, --surface filter, --json (exit 0); unknown surface (exit 2 — not classifier)", async () => {
-  const cfg = "examples/lifeofbash.config.ts";
-  expect(await main(["queue", "--config", cfg], process.cwd())).toBe(0);
-  expect(await main(["queue", "--surface", "organs", "--config", cfg], process.cwd())).toBe(0);
-  expect(await main(["queue", "--json", "--config", cfg], process.cwd())).toBe(0);
+  // Hermetic: a tmp two-surface binding + a tmp queue (no coupling to a real machine path).
+  const dir = mkdtempSync(join(tmpdir(), "tbw-cli-q-"));
+  const bindingMod = JSON.stringify(resolve(import.meta.dir, "../binding"));
+  await Bun.write(
+    join(dir, "thebashway.config.ts"),
+    `import { defineThebashway } from ${bindingMod};\n` +
+      `export default defineThebashway({\n` +
+      `  repoRoot: ${JSON.stringify(dir)},\n` +
+      `  defaultSurface: "tools",\n` +
+      `  surfaces: { organs: { dir: "organs", role: "r", chain: [] }, tools: { dir: "tools", role: "r", chain: [] } },\n` +
+      `  rails: { territoryGlobs: [], keywords: /a^/, requireBrief: false },\n` +
+      `  learning: { local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md" },\n` +
+      `});\n`,
+  );
+  await Bun.write(
+    join(dir, ".thebashway/queue.md"),
+    `# queue\n\n` +
+      `- [ ] OrgThing        @unclaimed\n  Goal: g\n  Territory: organs/x/**\n  Done-when: green\n\n` +
+      `- [ ] ToolThing        @unclaimed\n  Goal: g\n  Territory: tools/y/**\n  Done-when: green\n\n` +
+      `- [ ] Rough        @needs-intake\n  Goal: \n  Territory: \n  Done-when: \n`,
+  );
+  expect(await main(["queue"], dir)).toBe(0);
+  expect(await main(["queue", "--surface", "organs"], dir)).toBe(0);
+  expect(await main(["queue", "--surface", "tools"], dir)).toBe(0);
+  expect(await main(["queue", "--json"], dir)).toBe(0);
   // A bad surface returns 2 from cmdQueue — proving `queue` did NOT fall through to the
   // bare-request build/fix classifier (which would never return 2 for an unknown surface).
-  expect(await main(["queue", "--surface", "bogus", "--config", cfg], process.cwd())).toBe(2);
+  expect(await main(["queue", "--surface", "bogus"], dir)).toBe(2);
 });

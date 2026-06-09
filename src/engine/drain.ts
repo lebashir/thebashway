@@ -371,8 +371,11 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
               `[${surface}] mis-sliced pair — re-intake: "${item.title}" conflicts on the integration branch with an already-merged unit (declared-disjoint territories overlapped at merge).`,
             );
           } else {
+            // Non-mis-slice integration failures are not a cross-unit signal (those set
+            // misSlice); keep the message neutral so a git-infra failure (e.g. cannot
+            // checkout the integration branch) isn't mis-diagnosed as a code interaction.
             await deps.appendLessonFn(
-              `[${surface}] "${item.title}" verified alone but the integration re-verify failed (${reason}) — a cross-unit interaction the unit verify missed.`,
+              `[${surface}] "${item.title}" failed to integrate cleanly (${reason}) — investigate before re-claiming.`,
             );
           }
         } else {

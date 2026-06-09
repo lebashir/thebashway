@@ -200,5 +200,7 @@ non-breaking; no verb collisions). Build constraints folded in:
 
 ## Docs touched in the same change (docs-currency rule)
 
-`README.md`/`USAGE.md` command reference (new `add-decision` + `queue` verbs), `CLAUDE.md`
-(work-on-thebashway map if the verb set is enumerated), and the `usage()` text in `cli.ts`.
+`USAGE.md` command reference + learning-stores section (new `add-decision` + `queue` verbs;
+`decisions.md` bullet) and the `usage()` text in `cli.ts`. (README.md carries no command table —
+it defers to USAGE.md — so it is intentionally untouched. CLAUDE.md points at `cli.ts`/`usage()`
+as the authoritative command surface, so it stays accurate without edits.)

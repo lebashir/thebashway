@@ -121,8 +121,8 @@ deploy rolls back). Opt out per run with `--no-land`, or per surface with `stage
   repo, fed back into future runs so they aren't repeated. Written automatically by the drain:
   when a build basha emits a `LESSON:` line, or when a unit verify / integration re-verify fails,
   the distilled `- [<surface>] rule` is appended (tagged with the surface so it actually reaches
-  the next basha on that surface). Add one by hand with… there is no separate verb — lessons are
-  the auto-captured loop; `decisions.md` is the human-written one.
+  the next basha on that surface). There is no `add-lesson` verb — lessons are the auto-captured
+  (Loop B) loop; `decisions.md` is the human-written (Loop A) one.
 - **decisions** (`.thebashway/decisions.md`, Loop A) — decision-defaults that lower the per-item
   *question* rate: rules the intake applies before stopping to ask you. Written by
   `thebashway add-decision` (or by hand). The tag `decision` is the always-on global tier injected

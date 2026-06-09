@@ -609,7 +609,7 @@ test("Loop B: a unit verify failure synthesizes a [<surface>]-tagged lesson", as
   );
   expect(calls.lessons.length).toBe(1);
   expect(calls.lessons[0].startsWith("[tools]")).toBe(true); // surface tag → actually feeds forward
-  expect(calls.lessons[0]).toContain("re-verify");
+  expect(calls.lessons[0]).toContain("self-check"); // unique to the verify-fail synth (not the integration one)
   cleanup(p);
 });
 
@@ -622,7 +622,7 @@ test("Loop B: a non-mis-slice integration failure synthesizes a [<surface>]-tagg
   );
   expect(calls.lessons.length).toBe(1);
   expect(calls.lessons[0].startsWith("[tools]")).toBe(true);
-  expect(calls.lessons[0]).toContain("integration re-verify failed");
+  expect(calls.lessons[0]).toContain("failed to integrate");
   cleanup(p);
 });
 
