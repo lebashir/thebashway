@@ -21,16 +21,21 @@ engine can't ride inside the plugin.
 
 ## Build / test / typecheck
 
-- **Test (the green gate):** `bun test`. The whole suite must pass before any change is done.
+- **The green gate is `typecheck` + `test`** — both must pass before any change is done:
+  - `bun run typecheck` — `tsc --noEmit` over `src/` (run as `bun --bun x tsc`, see below). `typescript`
+    and `@types/bun` are devDeps, so tsc resolves the bun globals (no TS2688). **Test files are excluded**
+    from the typecheck (see `tsconfig.json` `exclude`) — they're runtime-checked by `bun test`, and
+    `noUncheckedIndexedAccess` on test scaffolding is noise, not a safety signal.
+  - `bun test` — the suite.
+- **Why `bun --bun x tsc`, not `bunx tsc`:** `bunx`/`tsc` shell out to `node`; if a machine's node is
+  broken (e.g. a Homebrew dylib mismatch), `bunx tsc` crashes. `bun --bun x tsc` runs the compiler under
+  Bun's own runtime, so the typecheck is node-independent. The `typecheck` script bakes this in.
 - **Run the CLI locally:** `bun run src/cli.ts <verb>` or `bun run thebashway <verb>`.
-- **Typecheck:** `bunx tsc --noEmit` **by hand only.** Do NOT add `tsc` to any verify chain —
-  the repo runs on Bun's transpile-time checking and ships no `@types/bun`, so standalone `tsc`
-  fails with TS2688 (missing bun types), not real errors. Ignore TS2688 noise; it is not a bug.
 - **No build step.** `package.json` `exports` point straight at `.ts` (`./src/index.ts`,
   `./src/binding.ts`); consumers run the source under Bun.
-- **CI:** `.github/workflows/ci.yml` runs `bun install --frozen-lockfile` + `bun test` on every
-  PR and push to `main`. It mirrors the green gate — `tsc` is intentionally absent for the same
-  TS2688 reason. Bump the pinned `bun-version` when you bump Bun locally.
+- **CI:** `.github/workflows/ci.yml` runs `bun install --frozen-lockfile` → `bun run typecheck` →
+  `bun test` on every PR and push to `main`. The dogfood verify chain (`thebashway.config.ts`) gates on
+  the same two. Bump the pinned `bun-version` when you bump Bun locally.
 
 ## Architecture map
 
@@ -106,7 +111,7 @@ Three non-obvious things:
 
 Two ways, by size:
 
-- **Small change:** edit + `bun test`. Run `bunx tsc --noEmit` by hand if you touched types.
+- **Small change:** edit + `bun run typecheck` + `bun test` (the two gate steps).
 - **Dogfood it:** `bun run thebashway fix src/engine/<file>` or `build "<feature>"` drives the
   change through the loop itself (per-task build bashas, cold review, verify gate). Good for a
   larger, well-scoped slice.

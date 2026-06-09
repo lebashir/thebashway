@@ -1,9 +1,9 @@
 name: CI
 
-# Run the green gate on every PR and on pushes to main. The gate is `bun test` ONLY,
-# mirroring the verify chain — `bunx tsc --noEmit` is deliberately NOT run here: the repo
-# runs on Bun's transpile-time checking and ships no @types/bun, so standalone tsc fails
-# with TS2688 (missing bun types), not real errors. See CLAUDE.md.
+# The green gate on every PR and push to main: typecheck + tests.
+# - `bun run typecheck` runs `tsc --noEmit` over src/ (tests are excluded — see tsconfig.json).
+#   @types/bun + typescript are devDeps, so tsc resolves the bun globals (no TS2688).
+# - `bun test` runs the suite.
 
 on:
   push:
@@ -12,8 +12,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: bun test
+  check:
+    name: typecheck + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,4 +22,5 @@ jobs:
           # Pinned to the dev environment for deterministic runs; bump when you bump Bun locally.
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - run: bun run typecheck
       - run: bun test

@@ -4,10 +4,9 @@
 // "thebashway" package name, which does not resolve INSIDE the engine repo, so this uses
 // a relative import like the examples/. One `engine` surface over the Bun/TS source.
 //
-// Verify chain is `[test]` only — `bun test` is the green gate. Standalone
-// `tsc --noEmit` is deliberately NOT in the chain: the repo runs on Bun's transpile-time
-// checking and does not install `@types/bun`, so `bunx tsc` fails on TS2688 (missing bun
-// types), not on real errors. Run `bunx tsc --noEmit` by hand if you want a typecheck pass.
+// Verify chain is `[typecheck, test]` — `bun run typecheck` (tsc over src/, via the
+// node-independent `bun --bun x tsc`) + `bun test`. typescript + @types/bun are devDeps, so tsc
+// resolves the bun globals (no TS2688); test files are excluded from the typecheck (see tsconfig).
 //
 // Learning stores point at the repo's REAL, accumulated Loop A/B files (src/engine/*.md),
 // so a build here dogfoods the live learning loop rather than empty `.thebashway/` seeds.
@@ -22,6 +21,7 @@ export default defineThebashway({
       dir: ".",
       role: "The thebashway engine itself — the portable Bun/TS build-loop library and CLI under src/**. The default and only home for features in this repo.",
       chain: [
+        { name: "typecheck", cmd: ["bun", "run", "typecheck"] },
         { name: "test", cmd: ["bun", "run", "test"] },
       ],
     },
