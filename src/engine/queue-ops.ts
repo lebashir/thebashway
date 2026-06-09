@@ -88,7 +88,12 @@ export function claimNext(
  * otherwise build a tools item with the organs chain (or vice versa).
  */
 function inSurface(item: QueueItem, surfaceDir: string): boolean {
-  return item.territory.length > 0 && item.territory.every((t) => t.startsWith(`${surfaceDir}/`));
+  if (item.territory.length === 0) return false;
+  // A root surface (dir ".") IS the whole repo — every item belongs to it. The
+  // `${dir}/` prefix test only makes sense for a real subdir surface (e.g. "tools",
+  // "organs"); for "." it would wrongly require territory to start with "./".
+  if (surfaceDir === "." || surfaceDir === "") return true;
+  return item.territory.every((t) => t.startsWith(`${surfaceDir}/`));
 }
 
 export function claimNextN(

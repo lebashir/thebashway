@@ -279,3 +279,23 @@ test("recordOpenQuestion sets the field, keeps needs-intake; false for other sta
   expect(it?.openQuestion).toBe("Which surface owns approach A: or B?");
   unlinkSync(p);
 });
+
+import { previewClaimable } from "../../queue-ops";
+
+test("previewClaimable: a root surface (dir '.') claims items whose territory has no leading './'", async () => {
+  // Portability: a single-root repo (thebashway, nextjs-minimal) declares surface dir ".".
+  // inSurface must treat "." as the whole repo, not require territory to start with "./".
+  const p = join(tmpdir(), `q-${Math.random().toString(36).slice(2)}.md`);
+  const it: QueueItem = {
+    title: "Root item",
+    status: "unclaimed",
+    goal: "g",
+    territory: ["src/engine/foo.ts"],
+    doneWhen: "v",
+    clarifications: [],
+  };
+  await Bun.write(p, `# build queue\n\n${serializeItem(it)}`);
+  const claimable = await previewClaimable(5, p, { surfaceDir: "." });
+  expect(claimable.map((i) => i.title)).toContain("Root item");
+  unlinkSync(p);
+});
