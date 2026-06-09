@@ -87,7 +87,7 @@ export function claimNext(
  * config, so it must only claim that surface's items — a mixed-surface queue would
  * otherwise build a tools item with the organs chain (or vice versa).
  */
-function inSurface(item: QueueItem, surfaceDir: string): boolean {
+export function inSurface(item: QueueItem, surfaceDir: string): boolean {
   if (item.territory.length === 0) return false;
   // A root surface (dir ".") IS the whole repo — every item belongs to it. The
   // `${dir}/` prefix test only makes sense for a real subdir surface (e.g. "tools",

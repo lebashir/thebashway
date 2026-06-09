@@ -20,6 +20,8 @@ and settings reference.
 | `thebashway audit-plan <target>` | Print the resolved plan for a target as JSON. Makes no model calls. |
 | `thebashway update` | Update the thebashway clone in place: `git pull --ff-only` + `bun install`. Reaches every project that uses it (they share the one clone); per-project config/state is untouched. Refuses on a dirty tree or a non-git install. |
 | `thebashway verify [<surface>] [--base <ref>] [--territory <glob>…] [--json]` | Run the per-surface gate (required-touches, freshness, the chain, smoke) against the binding-derived repoRoot, write the manifest (`paths.manifest`), exit 0/1. Surface defaults to `defaultSurface`. |
+| `thebashway add-decision "<rule>" [--tag <tag>]` | **Loop A writer.** Record a decision-default into `decisions.md` (the human/agent-driven mirror of the drain's automatic Loop B lesson capture). A `[tag]`-prefixed rule (`"[tools] prefer X"`) is parsed; `--tag` overrides; with neither, the tag defaults to `decision` (the always-on tier injected into every intake). Dedups. |
+| `thebashway queue [--surface <s>] [--json]` | **Per-surface build view.** A read-only split of the one queue into per-surface build lanes (plus an `unrouted` bucket for territory-less `@needs-intake` captures and an `other` bucket for items that span / fall under no surface). `--surface <s>` shows just that lane; `--json` emits the structured view. Reuses the same predicate the drain claim path uses, so the view can't drift from what `drain --surface` claims. |
 | Interactive driver verbs — `preflight` · `claim` · `park` · `unpark-scan` · `done` · `add` · `mark-ready` · `sweep` · `intake-list` · `intake-defer` · `seed-worktree` · `spawn-worktree` · `enqueue-findings` | Expose the loop's internals as commands so an agent can drive a build step-by-step in a live session (the interactive method — the higher-level `fix`/`build`/`run-to-goal` use them internally). Each loads the binding and reads paths + sinks from it. |
 | `--config <path>` | (Any command) use a binding file other than `./thebashway.config.ts`. |
 
@@ -115,8 +117,16 @@ deploy rolls back). Opt out per run with `--no-land`, or per surface with `stage
 
 ## The learning stores
 
-- **local** (`.thebashway/lessons.md`) — mistakes caught while building *this* repo, fed
-  back into future runs so they aren't repeated. Written automatically.
+- **local lessons** (`.thebashway/lessons.md`, Loop B) — mistakes caught while building *this*
+  repo, fed back into future runs so they aren't repeated. Written automatically by the drain:
+  when a build basha emits a `LESSON:` line, or when a unit verify / integration re-verify fails,
+  the distilled `- [<surface>] rule` is appended (tagged with the surface so it actually reaches
+  the next basha on that surface). Add one by hand with… there is no separate verb — lessons are
+  the auto-captured loop; `decisions.md` is the human-written one.
+- **decisions** (`.thebashway/decisions.md`, Loop A) — decision-defaults that lower the per-item
+  *question* rate: rules the intake applies before stopping to ask you. Written by
+  `thebashway add-decision` (or by hand). The tag `decision` is the always-on global tier injected
+  into every intake; other tags inject only for a matching item area.
 - **global** (optional) — a shared file every project reads, so a lesson learned once is
   reused everywhere. Point `learning.global` at it (e.g. a central
   `operating-lessons.md`).

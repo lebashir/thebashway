@@ -32,6 +32,9 @@ import { runUpdate, type Runner } from "./update";
 import { preflight, type PreflightSurface } from "./engine/preflight";
 import { seedWorktree, spawnWorktree } from "./engine/worktree-seed";
 import { claimNextN, markDone, appendCapture, markReady, recordOpenQuestion, enqueueFindings } from "./engine/queue-ops";
+import { parseQueue, type QueueItem, type QueueStatus } from "./engine/queue";
+import { queueView, type SurfaceLane } from "./engine/queue-view";
+import { appendDecision } from "./engine/lessons";
 import { runSweep } from "./engine/capture-sweep";
 import { listIntakeCandidates } from "./engine/auto-intake";
 import { runVerify } from "./engine/verify/index";
@@ -694,6 +697,101 @@ async function cmdEnqueueFindings(cwd: string, filePath: string, configPath?: st
   return 0;
 }
 
+/**
+ * LOOP A WRITER: `add-decision "<rule>" [--tag <tag>]`. Records a decision-default into the
+ * binding's `decisions.md` (the human/agent-driven mirror of the drain's auto Loop B lesson
+ * capture). A `[tag]`-prefixed positional (`add-decision "[tools] prefer X"`) is parsed; `--tag`
+ * overrides; with neither, the tag defaults to `decision` (the always-on global tier). Dedups.
+ */
+async function cmdAddDecision(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const tagFlag = args.indexOf("--tag");
+  const flagTag = tagFlag >= 0 ? args[tagFlag + 1] : undefined;
+  const skip = new Set<number>();
+  if (tagFlag >= 0) { skip.add(tagFlag); skip.add(tagFlag + 1); }
+  const positional = args.filter((a, i) => !skip.has(i) && !a.startsWith("--")).join(" ").trim();
+  if (!positional) {
+    console.error('add-decision: pass the rule, e.g. thebashway add-decision "prefer X over Y" --tag tools');
+    return 2;
+  }
+  // An explicit `[tag] rule` form is parsed (the same shape the drain's appendLessonFn uses).
+  const m = positional.match(/^\[([^\]]+)\]\s*(.*)$/);
+  const tag = flagTag?.trim() || (m ? m[1].trim() : undefined);
+  const rule = (m ? m[2] : positional).trim();
+  if (!rule) {
+    console.error("add-decision: empty rule");
+    return 2;
+  }
+  const lb = await loadBinding({ cwd, configPath });
+  const wrote = await appendDecision(lb.paths.decisionsPath, { tag, rule });
+  console.log(wrote ? `recorded decision [${tag || "decision"}]: ${rule}` : `already recorded (no-op): ${rule}`);
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// PER-SURFACE QUEUE VIEW: `queue [--surface <s>] [--json]`. A read-only split of the one
+// queue into per-surface build lanes (+ unrouted / other buckets). Reuses the same inSurface
+// predicate the drain claim path uses, so the view can't drift from what `drain --surface` claims.
+// ---------------------------------------------------------------------------
+
+const QUEUE_STATUS_ORDER: QueueStatus[] = ["unclaimed", "claimed", "blocked", "parked", "parked-on", "needs-intake", "done"];
+const QUEUE_STATUS_LABEL: Record<QueueStatus, string> = {
+  unclaimed: "build-ready",
+  claimed: "in-flight",
+  blocked: "blocked",
+  parked: "parked",
+  "parked-on": "parked-on",
+  "needs-intake": "needs-intake",
+  done: "done",
+};
+
+function groupByStatus(items: QueueItem[]): Map<QueueStatus, QueueItem[]> {
+  const m = new Map<QueueStatus, QueueItem[]>();
+  for (const it of items) {
+    const arr = m.get(it.status) ?? [];
+    arr.push(it);
+    m.set(it.status, arr);
+  }
+  return m;
+}
+
+function printLane(label: string, items: QueueItem[]): void {
+  const groups = groupByStatus(items);
+  const counts = QUEUE_STATUS_ORDER.filter((s) => groups.get(s)?.length).map((s) => `${groups.get(s)!.length} ${QUEUE_STATUS_LABEL[s]}`);
+  console.log(`${label}: ${items.length} item(s)${counts.length ? ` — ${counts.join(", ")}` : ""}`);
+  for (const s of QUEUE_STATUS_ORDER) {
+    for (const it of groups.get(s) ?? []) {
+      console.log(`  - ${it.title}  [${QUEUE_STATUS_LABEL[s]}]${it.territory.length ? `  {${it.territory.join(", ")}}` : ""}`);
+    }
+  }
+}
+
+async function cmdQueue(cwd: string, args: string[], configPath?: string): Promise<number> {
+  const lb = await loadBinding({ cwd, configPath });
+  const asJson = args.includes("--json");
+  const surfFlag = args.indexOf("--surface");
+  const surfaceName = surfFlag >= 0 ? args[surfFlag + 1] : undefined;
+  const f = Bun.file(lb.paths.queuePath);
+  const items = (await f.exists()) ? parseQueue(await f.text()) : [];
+  const surfaces: SurfaceLane[] = Object.entries(lb.binding.surfaces).map(([name, c]) => ({ name, dir: c.dir }));
+  const view = queueView(items, surfaces);
+  if (asJson) {
+    console.log(JSON.stringify(view, null, 2));
+    return 0;
+  }
+  if (surfaceName) {
+    if (!lb.binding.surfaces[surfaceName]) {
+      console.error(`unknown surface: ${surfaceName} (configured: ${Object.keys(lb.binding.surfaces).join(", ")})`);
+      return 2;
+    }
+    printLane(surfaceName, view.lanes[surfaceName] ?? []);
+    return 0;
+  }
+  for (const s of surfaces) printLane(s.name, view.lanes[s.name] ?? []);
+  if (view.unrouted.length) printLane("unrouted (needs-intake — no build lane yet)", view.unrouted);
+  if (view.other.length) printLane("other (spans / under no surface)", view.other);
+  return 0;
+}
+
 async function cmdSeedWorktree(cwd: string, workPath: string, configPath?: string): Promise<number> {
   const lb = await loadBinding({ cwd, configPath });
   const paths = lb.binding.seedPaths ?? [];
@@ -887,6 +985,11 @@ function usage(): void {
   thebashway done <title>                mark an item @done
   thebashway add "<title>"               capture a rough item as @needs-intake
   thebashway mark-ready "<title>"        promote a needs-intake item to build-ready
+  thebashway add-decision "<rule>" [--tag <tag>]
+                                         LOOP A: record a decision-default into decisions.md
+                                         (tag defaults to "decision", the always-on tier; dedups)
+  thebashway queue [--surface <s>] [--json]
+                                         per-surface VIEW of the one queue (build lanes + unrouted/other)
   thebashway sweep [--max N] [--dry-run] scan for TODO(tbw)/FIXME(tbw) → @needs-intake
   thebashway intake-list [--json]        list @needs-intake items + assembled intake prompts
   thebashway intake-defer "<t>" "<q>"    record an open question, keep the item @needs-intake
@@ -942,6 +1045,10 @@ export async function main(argv: string[], cwd: string): Promise<number> {
       return args[0] ? cmdAdd(cwd, args.join(" "), configPath) : (usage(), 2);
     case "mark-ready":
       return args[0] ? cmdMarkReady(cwd, args.join(" "), configPath) : (usage(), 2);
+    case "add-decision":
+      return args.length ? cmdAddDecision(cwd, args, configPath) : (usage(), 2);
+    case "queue":
+      return cmdQueue(cwd, args, configPath);
     case "sweep": {
       const maxFlag = args.indexOf("--max");
       const maxRaw = maxFlag >= 0 ? Number(args[maxFlag + 1]) : NaN;

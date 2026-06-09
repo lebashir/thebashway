@@ -91,3 +91,18 @@ export async function appendLesson(path: string, lesson: Lesson): Promise<boolea
   await Bun.write(path, `${before}${sep}${newLine.trimEnd()}\n${blank}${after}`);
   return true;
 }
+
+/**
+ * Append a Loop A DECISION to `decisions.md`. The mirror of `appendLesson` (Loop B): same
+ * `- [tag] rule` format, same dedup + `## Active`-aware insertion (it delegates — one writer).
+ * The one Loop-A distinction is the DEFAULT TAG: when `tag` is omitted/blank it is `"decision"`,
+ * the always-on global tier `intake-prompt.ts` unions with the item's areas (so a decision with
+ * no specific area is injected into EVERY intake). Returns false on dedup, like its mirror.
+ */
+export async function appendDecision(
+  path: string,
+  decision: { tag?: string; rule: string },
+): Promise<boolean> {
+  const tag = decision.tag?.trim() || "decision";
+  return appendLesson(path, { tag, rule: decision.rule });
+}

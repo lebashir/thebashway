@@ -47,6 +47,11 @@ export interface BashaOutcome {
   ok: boolean;
   branch: string;
   reason?: string;
+  /** Loop B (capture-as-you-go): a one-line `[tag] rule` the basha self-distilled (parsed from a
+   * `LESSON:` marker in its output) when a gate caught a reusable pitfall — on a DONE (it
+   * overcame it) or a BLOCKED (it authored the failure). Routed verbatim through `appendLessonFn`
+   * so the next basha on this surface avoids it. Optional — omitted leaves behavior unchanged. */
+  lesson?: string;
 }
 export interface VerifyOutcome {
   ok: boolean;
@@ -320,12 +325,20 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
       basha = await deps.runBasha(item, { worktree, branch: unitBranch });
     }
 
+    // Loop B capture (basha-emitted): a basha may self-distill a reusable pitfall as a
+    // `LESSON: [tag] rule` line — on a DONE (capture-as-you-go) or a BLOCKED. Route it forward
+    // verbatim through appendLessonFn (which parses `[tag] rule`; dedup collapses repeats). This
+    // is the literal "the failing basha emits" path; the gate-detected failures below synthesize.
+    if (basha.lesson) await deps.appendLessonFn(basha.lesson);
+
     if (!basha.ok) {
       const reason = basha.reason ?? "build failed";
       await markBlocked(item.title, reason, opts.queuePath);
       report.blocked.push({ item: item.title, reason });
       rec.deployResult = `blocked: ${reason}`;
       rec.anomalies.push("build failed");
+      // No synthesized lesson on a plain build-fail: it is often a transient timeout (after the
+      // one retry above), and the basha's own LESSON:/BLOCKED text already carries the signal.
     } else {
       const v = await deps.verifyUnit(item, unitBranch, worktree);
       rec.manifestHash = v.manifestHash || "-";
@@ -336,6 +349,12 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
         rec.reviewVerdict = "verify-fail";
         rec.deployResult = `blocked: ${reason}`;
         rec.anomalies.push("verify failed");
+        // Loop B (synthesized): the basha returned DONE but drain's re-verify disagreed. Tag with
+        // the SURFACE so the lesson actually feeds forward (basha prompts inject lessons by
+        // buildAreas:[surface]; a non-surface tag would never inject).
+        await deps.appendLessonFn(
+          `[${surface}] "${item.title}" passed the build basha's self-check but failed drain's re-verify (${reason}) — the basha's verify run and the gate diverged; assert the failing case before re-claiming.`,
+        );
       } else {
         rec.reviewVerdict = "verify-pass";
         const unionTerritory = [...mergedTerritories, ...item.territory];
@@ -346,9 +365,14 @@ export async function drain(opts: DrainOptions, deps: DrainDeps): Promise<DrainR
           report.blocked.push({ item: item.title, reason });
           rec.deployResult = `blocked: ${reason}`;
           rec.anomalies.push(integ.misSlice ? "mis-sliced" : "integration failed");
+          // Loop B (synthesized): tag with the SURFACE (not [integration]) so it feeds forward.
           if (integ.misSlice) {
             await deps.appendLessonFn(
-              `[integration] mis-sliced pair — re-intake: "${item.title}" conflicts on the integration branch with an already-merged unit (declared-disjoint territories overlapped at merge).`,
+              `[${surface}] mis-sliced pair — re-intake: "${item.title}" conflicts on the integration branch with an already-merged unit (declared-disjoint territories overlapped at merge).`,
+            );
+          } else {
+            await deps.appendLessonFn(
+              `[${surface}] "${item.title}" verified alone but the integration re-verify failed (${reason}) — a cross-unit interaction the unit verify missed.`,
             );
           }
         } else {
@@ -515,6 +539,9 @@ export function defaultDrainDeps(cfg: {
         `Do NOT deploy, do NOT push, do NOT touch anything outside TERRITORY.`,
         `End your output with exactly one line: "DONE: <one-line summary>" on success,`,
         `or "BLOCKED: <reason>" if you cannot complete it.`,
+        `If a gate (typecheck/test/lint) caught a non-obvious mistake you had to fix — or you are`,
+        `blocked by one — ALSO emit one extra final line: "LESSON: [${cfg.surface}] <one-line rule>"`,
+        `so the next basha on this surface avoids it.`,
       ].join("\n");
       const prompt = await buildBashaPromptFromDisk({
         repoRoot: cfg.repoRoot,
@@ -532,11 +559,14 @@ export function defaultDrainDeps(cfg: {
         model,
         skipPermissions: true,
       });
-      if (!res.ok) return { ok: false, branch: ctx.branch, reason: res.timedOut ? "basha timed out" : "basha exited non-zero" };
+      // Loop B: parse an optional self-distilled `LESSON: [tag] rule` line (may be present on a
+      // DONE or a BLOCKED); the core routes it through appendLessonFn.
+      const lesson = parseMarker(res.stdout, "LESSON") ?? undefined;
+      if (!res.ok) return { ok: false, branch: ctx.branch, reason: res.timedOut ? "basha timed out" : "basha exited non-zero", lesson };
       const done = parseMarker(res.stdout, "DONE");
-      if (done !== null) return { ok: true, branch: ctx.branch };
+      if (done !== null) return { ok: true, branch: ctx.branch, lesson };
       const blocked = parseMarker(res.stdout, "BLOCKED");
-      return { ok: false, branch: ctx.branch, reason: blocked ?? "no DONE/BLOCKED marker" };
+      return { ok: false, branch: ctx.branch, reason: blocked ?? "no DONE/BLOCKED marker", lesson };
     },
 
     async verifyUnit(item, _branch, worktree) {

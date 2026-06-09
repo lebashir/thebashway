@@ -1,7 +1,7 @@
 import { test, expect, afterEach } from "bun:test";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { derivePaths, loadBinding, main } from "../cli";
 import { defineThebashway } from "../binding";
 import { resetBinding } from "../engine/config";
@@ -57,4 +57,42 @@ test("main init scaffolds a config in a fresh dir", async () => {
   expect(existsSync(join(dir, "thebashway.config.ts"))).toBe(true);
   expect(existsSync(join(dir, ".thebashway/lessons.md"))).toBe(true);
   expect([0, 1]).toContain(code); // 1 only because a bare tmpdir isn't a git repo
+});
+
+test("main add-decision writes to the binding's decisions.md, parses [tag], and dedups", async () => {
+  // A self-resolving tmp binding (absolute import of the package's own defineThebashway) writing
+  // to a tmp decisions.md — avoids `init`'s package-name import (unresolvable in a bare dir) and
+  // never touches a real project's files.
+  const dir = mkdtempSync(join(tmpdir(), "tbw-cli-dec-"));
+  const bindingMod = JSON.stringify(resolve(import.meta.dir, "../binding"));
+  await Bun.write(
+    join(dir, "thebashway.config.ts"),
+    `import { defineThebashway } from ${bindingMod};\n` +
+      `export default defineThebashway({\n` +
+      `  repoRoot: ${JSON.stringify(dir)},\n` +
+      `  defaultSurface: "app",\n` +
+      `  surfaces: { app: { dir: ".", role: "r", chain: [] } },\n` +
+      `  rails: { territoryGlobs: [], keywords: /a^/, requireBrief: false },\n` +
+      `  learning: { local: ".thebashway/lessons.md", decisions: ".thebashway/decisions.md" },\n` +
+      `});\n`,
+  );
+  const decisionsPath = join(dir, ".thebashway/decisions.md");
+  expect(await main(["add-decision", "[tools] prefer X over Y"], dir)).toBe(0);
+  expect(await Bun.file(decisionsPath).text()).toContain("[tools] prefer X over Y");
+  // The same rule via --tag is a dedup no-op (still exit 0, still one occurrence).
+  expect(await main(["add-decision", "prefer X over Y", "--tag", "tools"], dir)).toBe(0);
+  const text = await Bun.file(decisionsPath).text();
+  expect(text.match(/prefer X over Y/g)?.length).toBe(1);
+  // No rule → usage error (does NOT fall through to the build/fix classifier).
+  expect(await main(["add-decision"], dir)).toBe(2);
+});
+
+test("main queue: summary, --surface filter, --json (exit 0); unknown surface (exit 2 — not classifier)", async () => {
+  const cfg = "examples/lifeofbash.config.ts";
+  expect(await main(["queue", "--config", cfg], process.cwd())).toBe(0);
+  expect(await main(["queue", "--surface", "organs", "--config", cfg], process.cwd())).toBe(0);
+  expect(await main(["queue", "--json", "--config", cfg], process.cwd())).toBe(0);
+  // A bad surface returns 2 from cmdQueue — proving `queue` did NOT fall through to the
+  // bare-request build/fix classifier (which would never return 2 for an unknown surface).
+  expect(await main(["queue", "--surface", "bogus", "--config", cfg], process.cwd())).toBe(2);
 });

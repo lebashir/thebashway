@@ -569,3 +569,83 @@ test("unsafeIntegrationBranch still aborts regardless of the early-stop seam", a
   expect(calls.basha).toEqual([]); // nothing processed
   cleanup(p);
 });
+
+// ---------------------------------------------------------------------------
+// Loop B capture seam: a basha-emitted LESSON is routed verbatim; a gate-detected failure
+// (verify / non-mis-slice integration) synthesizes a [<surface>]-tagged lesson so it feeds
+// forward. Plain build-fail without a basha lesson captures nothing.
+// ---------------------------------------------------------------------------
+
+test("Loop B: a basha-emitted LESSON on a DONE is routed verbatim through appendLessonFn", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc1", territory: "tools/lc1/**" })]);
+  const calls = mkCalls();
+  const report = await drain(
+    base(p),
+    mkDeps({ runBasha: async (item, ctx) => { calls.basha.push(item.title); return { ok: true, branch: ctx.branch, lesson: "[tools] never X without Y" }; } }, calls),
+  );
+  expect(report.succeeded).toEqual(["Lc1"]); // captured AND still ships
+  expect(calls.lessons).toEqual(["[tools] never X without Y"]);
+  cleanup(p);
+});
+
+test("Loop B: a basha-emitted LESSON on a BLOCKED build is routed (item still @blocked)", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc2", territory: "tools/lc2/**" })]);
+  const calls = mkCalls();
+  const report = await drain(
+    base(p),
+    mkDeps({ runBasha: async (_item, ctx) => ({ ok: false, branch: ctx.branch, reason: "stuck", lesson: "[tools] the API needs Z first" }) }, calls),
+  );
+  expect(report.blocked[0].item).toBe("Lc2");
+  expect(calls.lessons).toEqual(["[tools] the API needs Z first"]); // routed once (not per retry)
+  cleanup(p);
+});
+
+test("Loop B: a unit verify failure synthesizes a [<surface>]-tagged lesson", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc3", territory: "tools/lc3/**" })]);
+  const calls = mkCalls();
+  await drain(
+    base(p),
+    mkDeps({ verifyUnit: async () => ({ ok: false, manifestHash: "-", reason: "red" }) }, calls),
+  );
+  expect(calls.lessons.length).toBe(1);
+  expect(calls.lessons[0].startsWith("[tools]")).toBe(true); // surface tag → actually feeds forward
+  expect(calls.lessons[0]).toContain("re-verify");
+  cleanup(p);
+});
+
+test("Loop B: a non-mis-slice integration failure synthesizes a [<surface>]-tagged lesson", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc4", territory: "tools/lc4/**" })]);
+  const calls = mkCalls();
+  await drain(
+    base(p),
+    mkDeps({ integrateUnit: async () => ({ ok: false, reason: "boom" }) }, calls), // misSlice falsy
+  );
+  expect(calls.lessons.length).toBe(1);
+  expect(calls.lessons[0].startsWith("[tools]")).toBe(true);
+  expect(calls.lessons[0]).toContain("integration re-verify failed");
+  cleanup(p);
+});
+
+test("Loop B: the mis-slice lesson is re-tagged to the surface (keeps the `mis-slice` body)", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc5", territory: "tools/lc5/**" })]);
+  const calls = mkCalls();
+  await drain(
+    base(p),
+    mkDeps({ integrateUnit: async () => ({ ok: false, reason: "scope conflict", misSlice: true }) }, calls),
+  );
+  expect(calls.lessons.length).toBe(1);
+  expect(calls.lessons[0].startsWith("[tools]")).toBe(true); // was [integration] (never fed forward)
+  expect(calls.lessons[0].toLowerCase()).toContain("mis-slice");
+  cleanup(p);
+});
+
+test("Loop B: a plain build-fail with NO basha lesson captures nothing (no synth noise)", async () => {
+  const p = await writeQueue([itemBlock({ title: "Lc6", territory: "tools/lc6/**" })]);
+  const calls = mkCalls();
+  await drain(
+    base(p),
+    mkDeps({ runBasha: async (_item, ctx) => ({ ok: false, branch: ctx.branch, reason: "compile error" }) }, calls),
+  );
+  expect(calls.lessons).toEqual([]); // build-fail is not synthesized (often transient)
+  cleanup(p);
+});

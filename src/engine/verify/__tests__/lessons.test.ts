@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLessons, readLessons, relevantLessons, formatForPrompt, appendLesson } from "../../lessons";
+import { parseLessons, readLessons, relevantLessons, formatForPrompt, appendLesson, appendDecision } from "../../lessons";
 
 const SAMPLE = `# lessons
 
@@ -62,6 +62,36 @@ test("appendLesson appends, and dedups identical rules", async () => {
   const ls = await readLessons(p);
   expect(ls).toHaveLength(2);
   expect(existsSync(p)).toBe(true);
+  unlinkSync(p);
+});
+
+test("appendDecision defaults the tag to `decision` (the always-on global tier) when omitted", async () => {
+  const p = join(tmpdir(), `decisions-${Math.random().toString(36).slice(2)}.md`);
+  expect(await appendDecision(p, { rule: "ask once, then default" })).toBe(true);
+  const ls = await readLessons(p);
+  expect(ls).toHaveLength(1);
+  expect(ls[0]).toEqual({ tag: "decision", rule: "ask once, then default" });
+  unlinkSync(p);
+});
+
+test("appendDecision honors an explicit tag and dedups identical rules", async () => {
+  const p = join(tmpdir(), `decisions-${Math.random().toString(36).slice(2)}.md`);
+  expect(await appendDecision(p, { tag: "tools", rule: "prefer X over Y" })).toBe(true);
+  expect(await appendDecision(p, { tag: "tools", rule: "prefer X over Y" })).toBe(false); // dup
+  // A blank/whitespace tag falls back to the default.
+  expect(await appendDecision(p, { tag: "   ", rule: "another default" })).toBe(true);
+  const ls = await readLessons(p);
+  expect(ls.map((l) => l.tag)).toEqual(["tools", "decision"]);
+  unlinkSync(p);
+});
+
+test("appendDecision inserts into the `## Active` section (delegates to appendLesson)", async () => {
+  const p = join(tmpdir(), `decisions-${Math.random().toString(36).slice(2)}.md`);
+  await Bun.write(p, `# decisions\n\n## Active\n\n- [decision] first\n\n## Graduated\n\n- [decision] retired\n`);
+  expect(await appendDecision(p, { rule: "new active decision" })).toBe(true);
+  const text = await Bun.file(p).text();
+  expect(text.indexOf("new active decision")).toBeGreaterThan(text.indexOf("## Active"));
+  expect(text.indexOf("new active decision")).toBeLessThan(text.indexOf("## Graduated"));
   unlinkSync(p);
 });
 
