@@ -17,14 +17,14 @@ test("parseLessons reads `- [tag] rule` lines, ignores prose", () => {
   const ls = parseLessons(SAMPLE);
   expect(ls).toHaveLength(3);
   expect(ls[0]).toEqual({ tag: "general", rule: "Use sonnet not haiku for bashas — haiku thrashes." });
-  expect(ls[1].tag).toBe("organs");
+  expect(ls[1]!.tag).toBe("organs"); // index 1 of 3-element array asserted above
 });
 
 test("ignores lessons inside HTML comments (template examples are not live)", () => {
   const md = `# lessons\n<!--\n- [general] commented example, not a real lesson\n-->\n- [app] a real one\n`;
   const ls = parseLessons(md);
   expect(ls).toHaveLength(1);
-  expect(ls[0].tag).toBe("app");
+  expect(ls[0]!.tag).toBe("app"); // index 0 of 1-element array asserted above
 });
 
 test("relevantLessons returns general + matching area, drops the rest", () => {
